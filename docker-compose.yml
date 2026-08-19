@@ -1,0 +1,55 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  openevolve:
+    image: ghcr.io/algorithmicsuperintelligence/openevolve:latest
+    container_name: openevolve
+    depends_on:
+      - ollama
+    volumes:
+      - ./:/app
+    environment:
+      - "OPENAI_API_KEY=${OPENAI_API_KEY:?ERROR: OPENAI_API_KEY host environment variable is not set!}"
+    entrypoint: ["python", "/app/openevolve/openevolve-run.py"]
+    command: >
+      openevolve/examples/function_minimization/initial_program.py
+      openevolve/examples/function_minimization/evaluator.py
+      --config /app/config.yaml
+      --iterations 100
+
+  visualizer:
+    image: ghcr.io/algorithmicsuperintelligence/openevolve:latest
+    container_name: openevolve_visualizer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - openevolve
+    volumes:
+      - ./:/app
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        until [ -d /app/openevolve/examples/function_minimization/openevolve_output/checkpoints ]; do
+          echo "Waiting for checkpoints directory to be created...";
+          sleep 5;
+        done;
+        echo "Checkpoints directory found! Starting visualizer...";
+        python /app/openevolve/scripts/visualizer.py --path /app/openevolve/examples/function_minimization/openevolve_output/checkpoints --host 0.0.0.0
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

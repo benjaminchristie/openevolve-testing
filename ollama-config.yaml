@@ -1,0 +1,8 @@
+log_level: "INFO"
+
+database:
+  log_prompts: true
+
+llm:
+  api_base: "http://ollama:11434/v1"
+  primary_model: "qwen2.5-coder:7b"

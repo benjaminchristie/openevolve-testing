@@ -1,0 +1,9 @@
+log_level: "INFO"
+
+database:
+  log_prompts: true
+
+llm:
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  primary_model: "gemini-3-flash-preview"
+  temperature: 0.2
