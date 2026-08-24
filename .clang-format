@@ -1,0 +1,25 @@
+BasedOnStyle: LLVM
+ColumnLimit: 160
+TabWidth: 4
+IndentWidth: 4
+UseTab: Always
+AccessModifierOffset: -4
+BreakBeforeBraces: Attach
+
+# alignment
+AlignConsecutiveAssignments: 
+  Enabled: false
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: 
+  Enabled: true
+  AcrossComments: false
+  AcrossEmptyLines: true
+AlignEscapedNewlines: Right
+BinPackArguments: false
+BinPackParameters: false
+NamespaceIndentation: All
+
+# extra formatting
+Cpp11BracedListStyle: true
+FixNamespaceComments: true
+InsertNewlineAtEOF: true 
