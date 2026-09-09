@@ -1,9 +1,6 @@
 # openevolve-testing
 
-Uses [OpenEvolve](https://github.com/codelion/openevolve) to evolve functions inside real
-C/C++/Python projects, instead of one hand-crafted file. A `bundler` tool extracts
-`@evolve`-tagged functions from your actual source tree, hands them to OpenEvolve, and splices
-the mutations back in.
+Uses [OpenEvolve](https://github.com/codelion/openevolve) to evolve functions inside C/C++/Python projects. A `bundler` tool extracts `@evolve`-tagged functions from your actual source tree, hands them to OpenEvolve, and splices the mutations back in.
 
 ## Running an example
 
@@ -17,7 +14,7 @@ Runs `examples/matmul_cpp` by default. Switch with `EXAMPLE=matmul_py`. Results 
 `openevolve_output/<name>/`; the visualizer comes up on `localhost:8080` once a checkpoint
 exists.
 
-Set `UID`/`GID` like that or Docker writes into the repo as root and you'll need sudo to clean
+Set `UID`/`GID` like that or Docker writes into the repo as root and you'll need `sudo` to clean
 up after.
 
 ## Adding your own project
@@ -28,7 +25,7 @@ python3 scripts/new_project.py my_project --language python --objective maximize
 
 (`--list-objectives` for the full list.) This writes `examples/my_project/` and
 `config/my_project.yaml`. Open the generated source file, write your algorithm in `solve()`,
-write a real correctness check in `main()`, then:
+write a correctness check in `main()`, then:
 
 ```sh
 python3 eval/prepare.py examples/my_project
