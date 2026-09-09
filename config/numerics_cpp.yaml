@@ -1,0 +1,26 @@
+log_level: "INFO"
+file_suffix: ".cpp"
+language: "cpp"
+
+diff_based_evolution: true
+max_iterations: 100
+checkpoint_interval: 10
+
+llm:
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  primary_model: "gemini-3.1-flash-lite"
+  temperature: 0.2
+  system_message: |
+    You are an expert C++ engineer optimizing a small numerics library.
+    Optimize the functions defined inside the EVOLVE-BLOCK markers to maximize execution speed.
+    The block may contain multiple related functions from different files -- keep them
+    consistent with each other if you change one's behavior.
+    Do not change any function signature or break correctness.
+
+database:
+  num_islands: 2
+
+evaluator:
+  cascade_evaluation: true
+  cascade_thresholds: [1.0, 1.0]
+  parallel_evaluations: 2

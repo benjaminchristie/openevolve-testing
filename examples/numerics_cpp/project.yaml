@@ -1,0 +1,36 @@
+# Multi-file project: vector_ops.cpp + matrix_ops.cpp tagged @evolve(linalg),
+# sorting.cpp + searching.cpp tagged @evolve(sorting). group: all bundles
+# both groups together; pass --group linalg or --group sorting to bundler
+# directly to test one group in isolation.
+name: numerics_cpp
+language: cpp
+file_suffix: ".cpp"
+
+bundler:
+  src_dir: src
+  group: all
+
+build:
+  cmd: ["sh", "-c", "$(command -v ccache) g++ -O2 -std=c++17 src/*.cpp -o numerics_bin"]
+  timeout_sec: 60
+  cache_env:
+    CCACHE_DIR: .ccache
+
+run:
+  cmd: ["./numerics_bin"]
+  timeout_sec: 15
+
+correctness:
+  extra_checks:
+    - name: asan_ubsan
+      cmd: ["sh", "-c", "$(command -v ccache) g++ -O1 -g -fsanitize=address,undefined -std=c++17 src/*.cpp -o numerics_asan && ./numerics_asan"]
+      timeout_sec: 30
+
+workspace:
+  mode: pool
+  pool_size: 2
+
+scoring:
+  primary_metric: duration_ms
+  mode: minimize
+  scale: 10000.0
