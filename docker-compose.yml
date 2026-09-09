@@ -16,41 +16,66 @@ services:
               capabilities: [gpu]
 
   openevolve:
-    image: ghcr.io/algorithmicsuperintelligence/openevolve:latest
+    build: .
+    image: openevolve-testing:local
     container_name: openevolve
     depends_on:
       - ollama
+    # Without this, the container writes into the bind-mounted repo (below)
+    # as root, which Docker maps to an unmapped/"nobody" owner on the host --
+    # those files then can't be deleted by the host user without sudo. Run
+    # compose as: UID=$(id -u) GID=$(id -g) docker compose up
+    # (bash's $UID is a read-only builtin, not auto-exported, so it has to be
+    # passed explicitly like this rather than just being picked up).
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
-      - ./:/app
+      - ./:/app2
     environment:
       - "OPENAI_API_KEY=${OPENAI_API_KEY:?ERROR: OPENAI_API_KEY host environment variable is not set!}"
+      # Which examples/<name>/ to run. Override on the host to switch examples,
+      # e.g.: EXAMPLE=matmul_py docker compose up openevolve
+      # Must match a directory under examples/ (project.yaml) *and* a
+      # config/<name>.yaml (the OpenEvolve run config for that example --
+      # language, system_message, cascade settings, etc.).
+      - "EXAMPLE=${EXAMPLE:-matmul_cpp}"
+      # Selects which examples/<project>/project.yaml eval/evaluator.py evaluates
+      # candidates against; see eval/evaluator.py.
+      - "OPENEVOLVE_PROJECT_DIR=/app2/examples/${EXAMPLE:-matmul_cpp}"
+      # See Dockerfile: the bundler binary is pre-built into the image at this
+      # path (outside the bind mount below), not into /app2/bundler/build.
+      - "BUNDLER_BIN=/opt/bundler_src/build/bundler"
     entrypoint: ["sh", "-c"]
-    command: 
+    command:
       - >
-        python /app/openevolve/openevolve-run.py
-        _initial_program.cpp
-        _evaluator.py
-        --config /app/config/config.yaml
-        --output /app/openevolve_output/some_testing
+        BUNDLE_PATH=$$(python3 /app2/eval/prepare.py "/app2/examples/$$EXAMPLE" | tail -1) &&
+        python /app/openevolve-run.py
+        "$$BUNDLE_PATH"
+        /app2/eval/evaluator.py
+        --config "/app2/config/$$EXAMPLE.yaml"
+        --output "/app2/openevolve_output/$$EXAMPLE"
 
   visualizer:
-    image: ghcr.io/algorithmicsuperintelligence/openevolve:latest
+    build: .
+    image: openevolve-testing:local
     container_name: openevolve_visualizer
     ports:
       - "8080:8080"
     depends_on:
       - openevolve
+    user: "${UID:-1000}:${GID:-1000}"  # see openevolve service above
     volumes:
-      - ./:/app
+      - ./:/app2
+    environment:
+      - "EXAMPLE=${EXAMPLE:-matmul_cpp}"
     entrypoint: ["sh", "-c"]
     command:
       - >
-        until [ -d /app/openevolve/examples/signal_processing/openevolve_output/checkpoints ]; do
+        until [ -d "/app2/openevolve_output/$$EXAMPLE/checkpoints" ]; do
           echo "Waiting for checkpoints directory to be created...";
           sleep 5;
         done;
         echo "Checkpoints directory found! Starting visualizer...";
-        python /app/openevolve/scripts/visualizer.py --path /app/openevolve/examples/signal_processing/openevolve_output/checkpoints --host 0.0.0.0
+        python /app/scripts/visualizer.py --path "/app2/openevolve_output/$$EXAMPLE/checkpoints" --host 0.0.0.0
     restart: unless-stopped
 
 volumes:

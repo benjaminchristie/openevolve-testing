@@ -3,3 +3,5 @@ openevolve_output
 junk
 build
 .cache
+.eval_workspaces
+.ccache

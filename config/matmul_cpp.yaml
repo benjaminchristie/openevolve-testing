@@ -7,11 +7,18 @@ language: "cpp"
 # silently drops unrecognized keys instead of erroring, so a stray "evolution:"
 # section here would appear to work while quietly having no effect at all.
 diff_based_evolution: true
-max_iterations: 100
+max_iterations: 10
+# Defaults to 100 if unset. The visualizer service waits for
+# openevolve_output/<example>/checkpoints/ to exist -- if checkpoint_interval
+# is greater than max_iterations (e.g. the default 100 against a quick
+# max_iterations: 10 smoke test), no checkpoint is ever written and the
+# visualizer waits forever even though the run itself completes normally.
+# Keep this <= max_iterations whenever you lower max_iterations for a
+# quick test.
+checkpoint_interval: 10
 
 llm:
-  api_base: "https://api.genai.mil/v1"
-  # api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
   primary_model: "gemini-3.1-flash-lite"
   temperature: 0.2
   system_message: |

@@ -35,22 +35,39 @@ if(NOT tree-sitter_POPULATED)
     )
 endif()
 
-FetchContent_Declare(
-    tree-sitter-cpp
-    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-cpp.git
-    GIT_TAG        v0.22.0
-    GIT_PROGRESS   TRUE
-)
-FetchContent_GetProperties(tree-sitter-cpp)
-if(NOT tree-sitter-cpp_POPULATED)
-    FetchContent_Populate(tree-sitter-cpp)
-    add_library(tree-sitter-cpp STATIC
-        ${tree-sitter-cpp_SOURCE_DIR}/src/parser.c
-        ${tree-sitter-cpp_SOURCE_DIR}/src/scanner.c
+# Adds one tree-sitter grammar as a static library named tree-sitter-<lang>.
+# Each grammar's src/ directory ships parser.c always, and scanner.c only when
+# the language needs an external scanner (e.g. Python's indentation-sensitive
+# tokens) -- the EXISTS check below handles both without per-language cases.
+function(add_tree_sitter_grammar lang repo tag)
+    FetchContent_Declare(
+        tree-sitter-${lang}
+        GIT_REPOSITORY ${repo}
+        GIT_TAG        ${tag}
+        GIT_PROGRESS   TRUE
     )
-    target_include_directories(tree-sitter-cpp PUBLIC ${tree-sitter-cpp_SOURCE_DIR}/src)
-    target_link_libraries(tree-sitter-cpp PRIVATE tree-sitter)
-endif()
+    FetchContent_GetProperties(tree-sitter-${lang})
+    if(NOT tree-sitter-${lang}_POPULATED)
+        FetchContent_Populate(tree-sitter-${lang})
+    endif()
+    set(_src ${tree-sitter-${lang}_SOURCE_DIR}/src)
+    set(_sources ${_src}/parser.c)
+    if(EXISTS ${_src}/scanner.c)
+        list(APPEND _sources ${_src}/scanner.c)
+    endif()
+    add_library(tree-sitter-${lang} STATIC ${_sources})
+    target_include_directories(tree-sitter-${lang} PUBLIC ${_src})
+    target_link_libraries(tree-sitter-${lang} PRIVATE tree-sitter)
+    set(tree-sitter-${lang}_SOURCE_DIR ${tree-sitter-${lang}_SOURCE_DIR} PARENT_SCOPE)
+endfunction()
+
+# Language registry: add a new grammar here (and to LANGUAGE_REGISTRY in
+# bundler.hpp) to extend the bundler to another language. See
+# bundler/include/bundler/languages.hpp for how each grammar is mapped to file
+# extensions and evolve-target node types.
+add_tree_sitter_grammar(cpp    https://github.com/tree-sitter/tree-sitter-cpp.git    v0.22.0)
+add_tree_sitter_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git      v0.21.4)
+add_tree_sitter_grammar(python https://github.com/tree-sitter/tree-sitter-python.git v0.21.0)
 
 add_executable(bundler
     src/main.cpp
@@ -65,5 +82,7 @@ target_include_directories(bundler PRIVATE
 target_link_libraries(bundler PRIVATE
     tree-sitter
     tree-sitter-cpp
+    tree-sitter-c
+    tree-sitter-python
     nlohmann_json::nlohmann_json
 )

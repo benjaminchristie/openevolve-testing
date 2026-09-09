@@ -1,0 +1,36 @@
+log_level: "INFO"
+file_suffix: ".py"
+language: "python"
+
+# NOTE: diff_based_evolution and max_iterations must be top-level fields, not
+# nested under an "evolution:" key -- OpenEvolve's config loader (dacite)
+# silently drops unrecognized keys instead of erroring, so a stray "evolution:"
+# section here would appear to work while quietly having no effect at all.
+diff_based_evolution: true
+max_iterations: 10
+# See config/matmul_cpp.yaml for why this must stay <= max_iterations (the
+# visualizer waits on a checkpoints/ directory that's only ever written every
+# checkpoint_interval iterations, and it defaults to 100).
+checkpoint_interval: 10
+
+llm:
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  primary_model: "gemini-3.1-flash-lite"
+  temperature: 0.2
+  system_message: |
+    You are an expert Python performance engineer.
+    Optimize the function defined inside the EVOLVE-BLOCK markers to maximize execution speed
+    while keeping it pure Python (no new third-party dependencies).
+    You may use techniques such as avoiding redundant work, better data structures,
+    local-variable caching of repeated lookups, or built-ins/stdlib functions implemented in C.
+    Do not change the function signature or break program correctness.
+
+database:
+  num_islands: 2
+
+evaluator:
+  cascade_evaluation: true
+  # See config/matmul_cpp.yaml for why these are 1.0/1.0 and why they must be
+  # top-level under evaluator:, not nested under "evolution:".
+  cascade_thresholds: [1.0, 1.0]
+  parallel_evaluations: 2

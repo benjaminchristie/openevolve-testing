@@ -1,7 +1,72 @@
 #include <bundler/bundler.hpp>
+#include <cstring>
+#include <iomanip>
+#include <random>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
+
+namespace {
+bool contains(const std::vector<std::string>& v, const std::string& s) {
+    return std::find(v.begin(), v.end(), s) != v.end();
+}
+}  // namespace
+
+// Language registry: add a grammar to CMakeLists.txt (add_tree_sitter_grammar)
+// and one entry here to extend the bundler to another language. Everything
+// else in extraction/injection is written against LanguageSpec, not against
+// any specific grammar's node types.
+const std::vector<LanguageSpec>& language_registry() {
+    static const std::vector<LanguageSpec> registry = {
+        {
+            "cpp",
+            {".cpp", ".hpp", ".cc", ".h", ".cxx"},
+            tree_sitter_cpp,
+            "//",
+            {"function_definition"},
+            {"template_declaration"},
+            {"parameter_list", "compound_statement"},
+        },
+        {
+            "c",
+            {".c"},
+            tree_sitter_c,
+            "//",
+            {"function_definition"},
+            {},
+            {"parameter_list", "compound_statement"},
+        },
+        {
+            "python",
+            {".py"},
+            tree_sitter_python,
+            "#",
+            {"function_definition"},
+            {"decorated_definition"},
+            {"parameters", "block"},
+        },
+    };
+    return registry;
+}
+
+const LanguageSpec* language_for_extension(const std::string& extension) {
+    for (const auto& lang : language_registry()) {
+        if (contains(lang.extensions, extension)) return &lang;
+    }
+    return nullptr;
+}
+
+// Generates a per-run random token so block delimiters can never collide with
+// literal text that happens to appear inside evolved code (e.g. a function
+// that itself builds strings containing the word "BLOCK_ID:").
+std::string generate_run_token() {
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<uint64_t> dist;
+    std::stringstream ss;
+    ss << std::hex << std::setw(16) << std::setfill('0') << dist(gen);
+    return ss.str();
+}
 
 
 struct CLIArgs {
@@ -26,6 +91,13 @@ void write_file(const std::string& path, const std::string& content) {
     out << content;
 }
 
+std::string trim(const std::string& s) {
+    size_t start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
+}
+
 void collect_comments(TSNode node, const std::string& source, std::vector<CommentNodeInfo>& comments) {
     if (std::string(ts_node_type(node)) == "comment") {
         comments.push_back({node, ts_node_start_byte(node), ts_node_end_byte(node)});
@@ -36,13 +108,13 @@ void collect_comments(TSNode node, const std::string& source, std::vector<Commen
     }
 }
 
-TSNode get_associated_function_node(TSNode comment_node) {
+TSNode get_associated_function_node(TSNode comment_node, const LanguageSpec& lang) {
     TSNode curr = comment_node;
     TSNode func_node = {};
 
     while (!ts_node_is_null(curr)) {
         std::string type = ts_node_type(curr);
-        if (type == "function_definition") {
+        if (contains(lang.block_node_types, type)) {
             func_node = curr;
             break;
         }
@@ -53,7 +125,7 @@ TSNode get_associated_function_node(TSNode comment_node) {
         curr = ts_node_next_sibling(comment_node);
         while (!ts_node_is_null(curr)) {
             std::string type = ts_node_type(curr);
-            if (type == "function_definition" || type == "template_declaration") {
+            if (contains(lang.block_node_types, type) || contains(lang.wrapper_node_types, type)) {
                 func_node = curr;
                 break;
             }
@@ -64,7 +136,7 @@ TSNode get_associated_function_node(TSNode comment_node) {
 
     if (!ts_node_is_null(func_node)) {
         TSNode parent = ts_node_parent(func_node);
-        if (!ts_node_is_null(parent) && std::string(ts_node_type(parent)) == "template_declaration") {
+        if (!ts_node_is_null(parent) && contains(lang.wrapper_node_types, std::string(ts_node_type(parent)))) {
             func_node = parent;
         }
     }
@@ -72,7 +144,33 @@ TSNode get_associated_function_node(TSNode comment_node) {
     return func_node;
 }
 
-TSNode get_function_name_node(TSNode node) {
+TSNode get_function_name_node(TSNode node, const LanguageSpec& lang) {
+    // If this is a wrapper (e.g. Python's decorated_definition, C++'s
+    // template_declaration), look up the name on the actual block node inside
+    // it, not by recursing from the wrapper's own top -- otherwise a
+    // decorator's own identifier (e.g. "staticmethod" in @staticmethod) gets
+    // found first and mistaken for the function's name.
+    std::string node_type = ts_node_type(node);
+    if (contains(lang.wrapper_node_types, node_type)) {
+        uint32_t wrapper_child_count = ts_node_child_count(node);
+        for (uint32_t i = 0; i < wrapper_child_count; ++i) {
+            TSNode child = ts_node_child(node, i);
+            std::string child_type = ts_node_type(child);
+            if (contains(lang.block_node_types, child_type) || contains(lang.wrapper_node_types, child_type)) {
+                return get_function_name_node(child, lang);
+            }
+        }
+        return {};
+    }
+
+    // Fast, language-agnostic path: most grammars (Python, plain C
+    // declarations) expose the declared name directly via a "name" field.
+    TSNode name_field = ts_node_child_by_field_name(node, "name", static_cast<uint32_t>(strlen("name")));
+    if (!ts_node_is_null(name_field)) return name_field;
+
+    // Fallback for grammars where the name is nested inside a declarator
+    // chain instead (C/C++ pointer/reference/template return types, function
+    // pointers, ...), which have no single top-level "name" field to read.
     std::string type = ts_node_type(node);
     if (type == "identifier" || type == "field_identifier" || type == "destructor_name") {
         return node;
@@ -81,8 +179,8 @@ TSNode get_function_name_node(TSNode node) {
     for (uint32_t i = 0; i < count; ++i) {
         TSNode child = ts_node_child(node, i);
         std::string child_type = ts_node_type(child);
-        if (child_type == "parameter_list" || child_type == "compound_statement") continue;
-        TSNode res = get_function_name_node(child);
+        if (contains(lang.name_search_skip_types, child_type)) continue;
+        TSNode res = get_function_name_node(child, lang);
         if (!ts_node_is_null(res)) return res;
     }
     return {};
@@ -92,11 +190,19 @@ TSNode get_function_name_node(TSNode node) {
 */
 void extract_blocks(const std::string& src_dir, const std::string& bundle_out, const std::string& map_out, const std::string& target_group) {
     TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_cpp());
 
     std::vector<BlockMetadata> metadata_list;
+    std::vector<std::string> mangled_snippets;
     std::set<std::tuple<std::string, size_t, size_t>> seen_function_ranges;
-    
+    std::set<std::string> languages_seen;
+    // The comment style used for the bundle's own markers/delimiters: taken
+    // from whichever language the first extracted block belongs to, so the
+    // generated bundle stays syntactically valid source (a Python bundle gets
+    // "#"-prefixed markers, not C-style "//"). Irrelevant when mixing
+    // languages in one bundle -- that already triggers the warning below.
+    std::string bundle_comment_prefix = "//";
+    bool bundle_comment_prefix_set = false;
+
     std::regex evolve_regex(R"(@evolve(?:\(\s*([a-zA-Z0-9_]*)\s*\))?)");
 
     int block_counter = 0;
@@ -104,11 +210,15 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
     for (const auto& entry : fs::recursive_directory_iterator(src_dir)) {
         if (!entry.is_regular_file()) continue;
         auto ext = entry.path().extension().string();
-        if (ext != ".cpp" && ext != ".hpp" && ext != ".cc" && ext != ".h" && ext != ".cxx") continue;
+        const LanguageSpec* lang_ptr = language_for_extension(ext);
+        if (lang_ptr == nullptr) continue;
+        const LanguageSpec& lang = *lang_ptr;
+        languages_seen.insert(lang.name);
 
         std::string path = entry.path().string();
         std::string source = read_file(path);
 
+        ts_parser_set_language(parser, lang.get_language());
         TSTree* tree = ts_parser_parse_string(parser, nullptr, source.c_str(), source.length());
         TSNode root = ts_tree_root_node(tree);
 
@@ -131,7 +241,7 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
                     continue;
                 }
 
-                TSNode func_node = get_associated_function_node(comment.node);
+                TSNode func_node = get_associated_function_node(comment.node, lang);
                 if (ts_node_is_null(func_node)) continue;
 
                 size_t final_start = ts_node_start_byte(func_node);
@@ -144,7 +254,7 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
                 std::string orig_name = "";
                 std::string mangled_name = "";
 
-                TSNode name_node = get_function_name_node(func_node);
+                TSNode name_node = get_function_name_node(func_node, lang);
                 if (!ts_node_is_null(name_node)) {
                     size_t name_start = ts_node_start_byte(name_node);
                     size_t name_end = ts_node_end_byte(name_node);
@@ -158,14 +268,19 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
                 }
 
                 metadata_list.push_back({
-                    block_counter, 
-                    is_universal ? "universal" : func_group, 
-                    path, 
-                    final_start, 
-                    final_end, 
-                    orig_name, 
+                    block_counter,
+                    is_universal ? "universal" : func_group,
+                    path,
+                    final_start,
+                    final_end,
+                    orig_name,
                     mangled_name
                 });
+                mangled_snippets.push_back(snippet);
+                if (!bundle_comment_prefix_set) {
+                    bundle_comment_prefix = lang.line_comment_prefix;
+                    bundle_comment_prefix_set = true;
+                }
                 block_counter++;
             }
         }
@@ -173,31 +288,32 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
     }
     ts_parser_delete(parser);
 
+    std::string run_token = generate_run_token();
+
+    const std::string& cp = bundle_comment_prefix;  // shorthand
     std::stringstream bundle_stream;
-    bundle_stream << "// ==========================================\n";
-    bundle_stream << "// AUTO-GENERATED BUNDLE FOR OPENEVOLVE\n";
+    bundle_stream << cp << " ==========================================\n";
+    bundle_stream << cp << " AUTO-GENERATED BUNDLE FOR OPENEVOLVE\n";
     if (!target_group.empty()) {
-        bundle_stream << "// TARGET GROUP: " << target_group << "\n";
+        bundle_stream << cp << " TARGET GROUP: " << target_group << "\n";
     }
-    bundle_stream << "// ==========================================\n\n";
-    bundle_stream << "// EVOLVE-BLOCK-START\n\n";
+    bundle_stream << cp << " ==========================================\n\n";
+    bundle_stream << cp << " EVOLVE-BLOCK-START\n\n";
 
-    for (const auto& meta : metadata_list) {
-        std::string source = read_file(meta.file_path);
-        std::string snippet = source.substr(meta.start_byte, meta.end_byte - meta.start_byte);
-        if (!meta.mangled_name.empty() && !meta.orig_name.empty()) {
-            snippet.replace(snippet.find(meta.orig_name), meta.orig_name.length(), meta.mangled_name);
-        }
-
-        bundle_stream << "// --- GROUP: " << meta.group_id << " | BLOCK_ID: " << meta.id << " (" << meta.file_path << ") ---\n";
-        bundle_stream << snippet << "\n\n";
+    for (size_t i = 0; i < metadata_list.size(); ++i) {
+        const auto& meta = metadata_list[i];
+        // The token makes this delimiter line effectively impossible to collide
+        // with literal text inside the evolved code itself (see generate_run_token).
+        bundle_stream << cp << " >>> OPENEVOLVE_BLOCK token=" << run_token << " id=" << meta.id
+                      << " group=" << meta.group_id << " file=" << meta.file_path << " <<<\n";
+        bundle_stream << mangled_snippets[i] << "\n\n";
     }
 
-    bundle_stream << "// EVOLVE-BLOCK-END\n";
+    bundle_stream << cp << " EVOLVE-BLOCK-END\n";
 
-    json json_map = json::array();
+    json blocks_json = json::array();
     for (const auto& meta : metadata_list) {
-        json_map.push_back({
+        blocks_json.push_back({
             {"id", meta.id},
             {"group_id", meta.group_id},
             {"file_path", meta.file_path},
@@ -207,11 +323,29 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
             {"mangled_name", meta.mangled_name}
         });
     }
+    json json_map = {
+        {"token", run_token},
+        {"comment_prefix", bundle_comment_prefix},
+        {"blocks", blocks_json}
+    };
 
     write_file(bundle_out, bundle_stream.str());
     write_file(map_out, json_map.dump(4));
 
-    std::cout << "[Bundler] Extracted " << metadata_list.size() << " functions into " << bundle_out 
+    if (languages_seen.size() > 1) {
+        std::cerr << "[Bundler] WARNING: extracted blocks span multiple languages (";
+        bool first = true;
+        for (const auto& l : languages_seen) {
+            if (!first) std::cerr << ", ";
+            std::cerr << l;
+            first = false;
+        }
+        std::cerr << ") into a single bundle. OpenEvolve evolves one program in one "
+                  << "language, so this bundle will most likely not build -- scope "
+                  << "--group (or --src) so each bundle covers a single language.\n";
+    }
+
+    std::cout << "[Bundler] Extracted " << metadata_list.size() << " functions into " << bundle_out
               << " (Filter: " << (target_group.empty() ? "ALL" : target_group) << ")\n";
 }
 
@@ -220,25 +354,52 @@ void inject_blocks(const std::string& bundle_in, const std::string& map_in) {
     std::string map_text = read_file(map_in);
     json json_map = json::parse(map_text);
 
+    if (!json_map.contains("token") || !json_map.contains("blocks")) {
+        throw std::runtime_error("Map file is missing required 'token'/'blocks' fields (stale format?).");
+    }
+    std::string run_token = json_map["token"];
+    // Older maps predate this field: "//" matches every bundle written before
+    // multi-language support existed, which were always C/C++.
+    std::string comment_prefix = json_map.value("comment_prefix", "//");
+    const json& blocks_json = json_map["blocks"];
+
+    // Only a line that starts with exactly this token-qualified prefix is treated as a
+    // block delimiter, so evolved code containing similar-looking text can never be
+    // misparsed as a boundary (see generate_run_token in extract_blocks). Neither "//"
+    // nor "#" contain regex metacharacters, so the prefix can be interpolated directly.
+    std::string delimiter_prefix = comment_prefix + " >>> OPENEVOLVE_BLOCK token=" + run_token + " id=";
+    std::regex id_regex("^" + comment_prefix + R"( >>> OPENEVOLVE_BLOCK token=[0-9a-f]+ id=(\d+))");
+    std::string end_marker = comment_prefix + " EVOLVE-BLOCK-END";
+
     std::map<int, std::string> mutated_blocks;
     std::istringstream stream(bundle_text);
     std::string line;
-    
+
     int current_id = -1;
     std::stringstream current_snippet;
 
     while (std::getline(stream, line)) {
-        if (line.find("BLOCK_ID:") != std::string::npos) {
+        std::string trimmed = trim(line);
+        std::smatch match;
+        // Both checks are anchored to the start of the (trimmed) line rather than
+        // matching the delimiter text anywhere within it -- otherwise a block whose own
+        // source code happens to contain this literal text as part of a larger statement
+        // (e.g. bundler evolving itself) would be misparsed as a boundary.
+        if (trimmed.rfind(delimiter_prefix, 0) == 0 && std::regex_search(trimmed, match, id_regex)) {
             if (current_id != -1) {
-                mutated_blocks[current_id] = current_snippet.str();
+                // Trim trailing blank lines: the bundle writer inserts a blank-line
+                // separator ("\n\n") after every block purely for readability, and
+                // without stripping it here that separator would get spliced into the
+                // source file as real content on every single inject cycle, growing
+                // without bound across repeated evolve/inject iterations.
+                mutated_blocks[current_id] = trim(current_snippet.str());
                 current_snippet.str("");
                 current_snippet.clear();
             }
-            size_t id_pos = line.find("BLOCK_ID:") + 10;
-            current_id = std::stoi(line.substr(id_pos));
-        } else if (line.find("// EVOLVE-BLOCK-END") != std::string::npos) {
+            current_id = std::stoi(match[1].str());
+        } else if (trimmed == end_marker) {
             if (current_id != -1) {
-                mutated_blocks[current_id] = current_snippet.str();
+                mutated_blocks[current_id] = trim(current_snippet.str());
             }
             break;
         } else if (current_id != -1) {
@@ -247,7 +408,7 @@ void inject_blocks(const std::string& bundle_in, const std::string& map_in) {
     }
 
     std::map<std::string, std::vector<BlockMetadata>> file_group;
-    for (const auto& item : json_map) {
+    for (const auto& item : blocks_json) {
         file_group[item["file_path"]].push_back({
             item["id"],
             item["group_id"],

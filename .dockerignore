@@ -1,0 +1,13 @@
+.git
+third_party/openevolve/.git
+openevolve_output/
+bundler/build/
+bundler/.cache/
+examples/*/build/
+examples/*/.eval_workspaces/
+examples/*/.ccache/
+junk/
+__pycache__/
+**/__pycache__/
+.vscode
+.idea
