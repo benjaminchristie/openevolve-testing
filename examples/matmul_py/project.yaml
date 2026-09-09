@@ -1,7 +1,4 @@
-# Same schema as examples/matmul_cpp/project.yaml -- proves the harness (and
-# the bundler's language registry) genuinely generalize across languages
-# rather than being C++-specific with a Python coat of paint. Only this file
-# and src/main.py differ from the C++ example; eval/harness.py is unchanged.
+# Same schema as examples/matmul_cpp/project.yaml
 name: matmul_py
 language: python
 file_suffix: ".py"
@@ -11,11 +8,7 @@ bundler:
   group: all
 
 build:
-  # Python has no separate compile step, but running the syntax/bytecode
-  # compiler here still catches a syntactically broken candidate cheaply,
-  # before ever executing it. No ccache-equivalent for pure Python -- there's
-  # nothing here to cache the way a compiler's object files are cached, so
-  # build.cache_env is simply omitted for this project.
+  # catches syntax errors cheaply before running the candidate
   cmd: ["python3", "-m", "py_compile", "src/main.py"]
   timeout_sec: 30
 
@@ -26,8 +19,7 @@ run:
 correctness:
   extra_checks:
     - name: type_check
-      # Best-effort: only enforced if mypy happens to be installed, so this
-      # project.yaml still works out of the box without extra dependencies.
+      # skips cleanly if mypy isn't installed
       cmd: ["sh", "-c", "command -v mypy >/dev/null 2>&1 && mypy --ignore-missing-imports src/main.py || true"]
       timeout_sec: 30
 

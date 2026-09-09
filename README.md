@@ -66,6 +66,27 @@ of JSON to stdout as its last line:
 generic harness (`eval/harness.py`) score projects in any language without a bespoke parser per
 project — see `examples/matmul_cpp/src/main.cpp` for a full worked example.
 
+**Don't build that JSON by hand.** `eval/pylib/openevolve_metrics.py` (Python) and
+`eval/include/openevolve_metrics.hpp`/`.h` (C++/C) give you `Timer`, `report(...)`, and
+`guarded(...)` so you don't re-derive JSON-escaping yourself — which is exactly how a real bug
+got into this project's own scaffolding templates at one point (an unescaped quote and an inline
+comment each silently corrupted the generated JSON in different ways, in different languages).
+`guarded` also turns an uncaught exception into a clean `status: "error"` report instead of the
+process just crashing with no stdout at all, which the harness could previously only report back
+as an opaque "run produced no stdout output". harness.py puts both on `PYTHONPATH`/`CPATH`
+automatically, so any project can just:
+```python
+from openevolve_metrics import Timer, report, guarded
+```
+```cpp
+#include <openevolve_metrics.hpp>
+using namespace openevolve;
+```
+`scripts/new_project.py` already scaffolds new projects against this; `examples/matmul_cpp` and
+`examples/matmul_py` use it too. Note this only applies inside the harness/OpenEvolve flow — if
+you compile a C/C++ example by hand outside of it, pass `-I eval/include` yourself, since
+`CPATH` is set by `eval/harness.py`'s subprocess calls, not globally.
+
 **Keep the correctness check out of reach of the evolved code.** The check that decides
 `status: "ok"` vs `"error"` must live outside the `@evolve`-tagged region (in `main()`, or a
 separate driver file bundler never scans). If it's inside the region being mutated, a
@@ -102,7 +123,8 @@ the scaffolding script prints all of them with descriptions.
 bundler/            The extraction/injection tool (C++, tree-sitter-based). Supports C, C++,
                      Python; see bundler/src/main.cpp's language_registry() to add another.
 eval/                harness.py (the evaluator core), evaluator.py (the OpenEvolve-facing shim),
-                     prepare.py (one-time extraction), objectives.py (presets).
+                     prepare.py (one-time extraction), objectives.py (presets), pylib/ + include/
+                     (the openevolve_metrics reporting library, see "Core concepts" above).
 examples/<name>/     One project per directory: src/, project.yaml, and (after prepare.py)
                      build/bundle.<ext> + build/map.json.
 config/<name>.yaml   OpenEvolve's own run config for that example (LLM, cascade, islands, ...).

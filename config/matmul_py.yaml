@@ -2,16 +2,11 @@ log_level: "INFO"
 file_suffix: ".py"
 language: "python"
 
-# NOTE: diff_based_evolution and max_iterations must be top-level fields, not
-# nested under an "evolution:" key -- OpenEvolve's config loader (dacite)
-# silently drops unrecognized keys instead of erroring, so a stray "evolution:"
-# section here would appear to work while quietly having no effect at all.
+# must be top-level, not nested under "evolution:" -- OpenEvolve silently
+# ignores unrecognized keys instead of erroring
 diff_based_evolution: true
 max_iterations: 10
-# See config/matmul_cpp.yaml for why this must stay <= max_iterations (the
-# visualizer waits on a checkpoints/ directory that's only ever written every
-# checkpoint_interval iterations, and it defaults to 100).
-checkpoint_interval: 10
+checkpoint_interval: 10  # keep <= max_iterations or the visualizer never sees a checkpoint (default 100)
 
 llm:
   api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -30,7 +25,5 @@ database:
 
 evaluator:
   cascade_evaluation: true
-  # See config/matmul_cpp.yaml for why these are 1.0/1.0 and why they must be
-  # top-level under evaluator:, not nested under "evolution:".
-  cascade_thresholds: [1.0, 1.0]
+  cascade_thresholds: [1.0, 1.0]  # require full correctness before stage3
   parallel_evaluations: 2

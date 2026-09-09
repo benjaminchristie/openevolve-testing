@@ -21,29 +21,17 @@ services:
     container_name: openevolve
     depends_on:
       - ollama
-    # Without this, the container writes into the bind-mounted repo (below)
-    # as root, which Docker maps to an unmapped/"nobody" owner on the host --
-    # those files then can't be deleted by the host user without sudo. Run
-    # compose as: UID=$(id -u) GID=$(id -g) docker compose up
-    # (bash's $UID is a read-only builtin, not auto-exported, so it has to be
-    # passed explicitly like this rather than just being picked up).
+    # without this, root-owned files land in the bind mount below and you'll
+    # need sudo to delete them; run as: UID=$(id -u) GID=$(id -g) docker compose up
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./:/app2
     environment:
       - "OPENAI_API_KEY=${OPENAI_API_KEY:?ERROR: OPENAI_API_KEY host environment variable is not set!}"
-      # Which examples/<name>/ to run. Override on the host to switch examples,
-      # e.g.: EXAMPLE=matmul_py docker compose up openevolve
-      # Must match a directory under examples/ (project.yaml) *and* a
-      # config/<name>.yaml (the OpenEvolve run config for that example --
-      # language, system_message, cascade settings, etc.).
+      # which examples/<name>/ to run, e.g.: EXAMPLE=matmul_py docker compose up openevolve
       - "EXAMPLE=${EXAMPLE:-matmul_cpp}"
-      # Selects which examples/<project>/project.yaml eval/evaluator.py evaluates
-      # candidates against; see eval/evaluator.py.
       - "OPENEVOLVE_PROJECT_DIR=/app2/examples/${EXAMPLE:-matmul_cpp}"
-      # See Dockerfile: the bundler binary is pre-built into the image at this
-      # path (outside the bind mount below), not into /app2/bundler/build.
-      - "BUNDLER_BIN=/opt/bundler_src/build/bundler"
+      - "BUNDLER_BIN=/opt/bundler_src/build/bundler"  # pre-built into the image, see Dockerfile
     entrypoint: ["sh", "-c"]
     command:
       - >

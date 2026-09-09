@@ -1,9 +1,0 @@
-log_level: "INFO"
-
-database:
-  log_prompts: true
-
-llm:
-  api_base: "https://api.genai.mil/v1"
-  primary_model: "gemini-3.7-flash"
-  temperature: 0.2

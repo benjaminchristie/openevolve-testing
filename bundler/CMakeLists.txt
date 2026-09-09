@@ -35,10 +35,8 @@ if(NOT tree-sitter_POPULATED)
     )
 endif()
 
-# Adds one tree-sitter grammar as a static library named tree-sitter-<lang>.
-# Each grammar's src/ directory ships parser.c always, and scanner.c only when
-# the language needs an external scanner (e.g. Python's indentation-sensitive
-# tokens) -- the EXISTS check below handles both without per-language cases.
+# Builds one tree-sitter grammar as a static lib named tree-sitter-<lang>.
+# scanner.c is optional (only some grammars, e.g. Python, need one).
 function(add_tree_sitter_grammar lang repo tag)
     FetchContent_Declare(
         tree-sitter-${lang}
@@ -61,10 +59,7 @@ function(add_tree_sitter_grammar lang repo tag)
     set(tree-sitter-${lang}_SOURCE_DIR ${tree-sitter-${lang}_SOURCE_DIR} PARENT_SCOPE)
 endfunction()
 
-# Language registry: add a new grammar here (and to LANGUAGE_REGISTRY in
-# bundler.hpp) to extend the bundler to another language. See
-# bundler/include/bundler/languages.hpp for how each grammar is mapped to file
-# extensions and evolve-target node types.
+# to add a language, add its grammar here and a LanguageSpec entry in src/main.cpp
 add_tree_sitter_grammar(cpp    https://github.com/tree-sitter/tree-sitter-cpp.git    v0.22.0)
 add_tree_sitter_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git      v0.21.4)
 add_tree_sitter_grammar(python https://github.com/tree-sitter/tree-sitter-python.git v0.21.0)

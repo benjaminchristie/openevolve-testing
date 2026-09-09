@@ -1,26 +1,16 @@
 """OpenEvolve-facing evaluator shim.
 
-OpenEvolve imports this file once per candidate and calls either the plain
-`evaluate(program_path)` function, or -- when evaluator.cascade_evaluation is
-set in config.yaml -- `evaluate_stage1`, then `evaluate_stage2`, then
-`evaluate_stage3`, stopping early if a stage's combined_score misses
-evaluator.cascade_thresholds. `program_path` is the mutated EVOLVE-BLOCK
-bundle OpenEvolve just produced. All the real work (workspace management,
-bundler inject, build, run, scoring) lives in harness.py, which is
-project-agnostic; this file's only job is picking which project.yaml to
-evaluate against and exposing the stage entry points OpenEvolve looks for.
-
-Which project to evaluate against is selected by the OPENEVOLVE_PROJECT_DIR
-environment variable (an absolute path to a directory containing project.yaml),
-defaulting to the matmul_cpp reference example so this file works out of the box.
+OpenEvolve calls evaluate(program_path), or -- with cascade_evaluation on --
+evaluate_stage1/2/3 in order, stopping early if a stage's combined_score
+misses cascade_thresholds. The real work lives in harness.py; this file just
+picks a project (via OPENEVOLVE_PROJECT_DIR) and exposes the entry points.
 """
 import os
 import sys
 from pathlib import Path
 
-# OpenEvolve loads this file directly by path (not as a package import), so this
-# directory isn't guaranteed to be on sys.path already -- add it explicitly so
-# the sibling `harness` module can be found regardless of how/where this runs.
+# OpenEvolve loads this file by path, not as a package import, so put the
+# sibling `harness` module on sys.path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from harness import evaluate_candidate
@@ -38,8 +28,7 @@ except ImportError:
 def _to_result(outcome):
     result = outcome.as_dict()
     if _HAVE_EVALUATION_RESULT and outcome.stderr_tail:
-        # Feed compiler/runtime errors back to the LLM as artifacts so the next
-        # generation sees *why* a candidate failed, not just a bare negative score.
+        # surfaces the error to the LLM instead of just a bare score
         return EvaluationResult(metrics=result, artifacts={"stderr": outcome.stderr_tail}) # type: ignore
     return result
 

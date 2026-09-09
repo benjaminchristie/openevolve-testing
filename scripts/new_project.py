@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
-"""Scaffolds a new examples/<name>/ project: a tagged source stub, a
-project.yaml, and a matching config/<name>.yaml -- so starting a new project
-means filling in a working skeleton instead of writing the whole schema from
-scratch by copying examples/matmul_cpp and hand-editing it.
+"""Scaffolds a new examples/<name>/ project: a tagged source stub,
+project.yaml, and config/<name>.yaml.
 
 Usage:
   python3 scripts/new_project.py my_project --language python --objective maximize_accuracy
   python3 scripts/new_project.py my_project --language cpp     # objective defaults to minimize_time
-
-Run `python3 scripts/new_project.py --list-objectives` to see every preset.
-
-After scaffolding, see the TODO comments in the generated source file (your
-algorithm + how to compute the objective metric) and project.yaml (the
-bundler group, build/run commands if the defaults don't fit).
+  python3 scripts/new_project.py --list-objectives
 """
 from __future__ import annotations
 
@@ -32,154 +25,115 @@ LANGUAGES = {
 }
 
 
-def _extra_metric_cpp(preset: objectives.ObjectivePreset) -> tuple[str, str]:
-    """Returns (decl_line, cout_fragment). Empty strings if the objective's
-    metric already *is* duration_ms, which main() computes unconditionally.
-
-    The TODO comment deliberately lives on its own declaration line rather
-    than inline in the cout chain -- an earlier version tried to embed it
-    directly in the JSON-building expression and it broke the enclosing
-    string literal (unescaped quotes) in exactly the way this now avoids."""
+def _extra_metric_line_cpp(preset: objectives.ObjectivePreset) -> str:
+    """A metrics.add(...) statement for the objective's metric, or "" if it's
+    duration_ms (already added unconditionally)."""
     if preset.metric_name == "duration_ms":
-        return "", ""
-    var = f"{preset.metric_name}_value"
-    decl = f"    double {var} = 0.0;  // TODO: compute your {preset.metric_name} here\n"
-    frag = f' << ", \\"{preset.metric_name}\\": " << {var}'
-    return decl, frag
+        return ""
+    return f'        metrics.add("{preset.metric_name}", 0.0);  // TODO: compute your {preset.metric_name} here\n'
 
 
-def _extra_metric_c(preset: objectives.ObjectivePreset) -> tuple[str, str, str]:
-    """Returns (decl_line, printf_format_fragment, printf_arg_fragment)."""
+def _extra_metric_line_c(preset: objectives.ObjectivePreset) -> str:
     if preset.metric_name == "duration_ms":
-        return "", "", ""
-    var = f"{preset.metric_name}_value"
-    decl = f"    double {var} = 0.0;  /* TODO: compute your {preset.metric_name} here */\n"
-    fmt = f', \\"{preset.metric_name}\\": %f'
-    arg = f", {var}"
-    return decl, fmt, arg
+        return ""
+    return f'    oe_metrics_add(&metrics, "{preset.metric_name}", 0.0);  /* TODO: compute your {preset.metric_name} here */\n'
 
 
-def _extra_metric_py(preset: objectives.ObjectivePreset) -> tuple[str, str]:
-    """Returns (decl_line, dict_fragment). See _extra_metric_cpp docstring --
-    same fix applies here even more sharply, since a Python "#" comment
-    embedded inside a single-line dict literal eats the rest of the line,
-    including the closing "}" that was supposed to end the literal."""
+def _extra_metric_line_py(preset: objectives.ObjectivePreset) -> str:
     if preset.metric_name == "duration_ms":
-        return "", ""
-    var = f"{preset.metric_name}_value"
-    decl = f"    {var} = 0.0  # TODO: compute your {preset.metric_name} here\n"
-    frag = f', "{preset.metric_name}": {var}'
-    return decl, frag
+        return ""
+    return f'    metrics["{preset.metric_name}"] = 0.0  # TODO: compute your {preset.metric_name} here\n'
 
 
 def render_cpp(name: str, preset: objectives.ObjectivePreset) -> str:
-    decl, frag = _extra_metric_cpp(preset)
-    return f"""#include <chrono>
-#include <iostream>
+    extra = _extra_metric_line_cpp(preset)
+    return f"""#include <openevolve_metrics.hpp>
+using namespace openevolve;
 
 /**
 @evolve
 */
 void solve() {{
-    // TODO: replace this with the code you want OpenEvolve to optimize.
-    // Keep the function signature stable -- OpenEvolve edits the body, not
-    // how it's called from main() below.
+    // TODO: your algorithm. Keep the signature stable.
 }}
 
 int main() {{
-    auto start = std::chrono::high_resolution_clock::now();
-    solve();
-    auto end = std::chrono::high_resolution_clock::now();
-    double duration_ms = std::chrono::duration<double, std::milli>(end - start).count();
-{decl}
-    // TODO: replace with a real correctness check (e.g. compare a computed
-    // result against a known-good expected value). A candidate that "passes"
-    // here but isn't actually correct will happily get evolved for speed at
-    // correctness's expense -- see README.md's note on keeping the check
-    // trustworthy.
-    bool correct = true;
+    return guarded([]() {{
+        Timer t;
+        solve();
 
-    std::cout << "{{\\"status\\": \\"" << (correct ? "ok" : "error")
-              << "\\", \\"metrics\\": {{\\"duration_ms\\": " << duration_ms{frag}
-              << "}}"
-              << (correct ? "" : ", \\"message\\": \\"TODO: describe the failure\\"")
-              << "}}" << std::endl;
-    return correct ? 0 : 1;
+        // TODO: a real correctness check -- see README.md on keeping this
+        // out of reach of the evolved code.
+        bool correct = true;
+
+        Metrics metrics;
+        metrics.add("duration_ms", t.elapsed_ms());
+{extra}
+        report(correct, metrics, correct ? "" : "TODO: describe the failure");
+        return correct ? 0 : 1;
+    }});
 }}
 """
 
 
 def render_c(name: str, preset: objectives.ObjectivePreset) -> str:
-    decl, fmt, arg = _extra_metric_c(preset)
-    return f"""#include <stdio.h>
-#include <time.h>
+    extra = _extra_metric_line_c(preset)
+    return f"""#include <openevolve_metrics.h>
 
 /* @evolve */
 void solve(void) {{
-    /* TODO: replace this with the code you want OpenEvolve to optimize.
-       Keep the function signature stable -- OpenEvolve edits the body, not
-       how it's called from main() below. */
+    /* TODO: your algorithm. Keep the signature stable. */
 }}
 
 int main(void) {{
-    /* timespec_get is standard C11 (unlike clock_gettime/CLOCK_MONOTONIC,
-       which are POSIX extensions hidden under strict -std=c11 without a
-       feature-test macro). */
-    struct timespec start, end;
-    timespec_get(&start, TIME_UTC);
+    oe_timer_t t;
+    oe_timer_start(&t);
     solve();
-    timespec_get(&end, TIME_UTC);
-    double duration_ms = (end.tv_sec - start.tv_sec) * 1000.0
-                        + (end.tv_nsec - start.tv_nsec) / 1e6;
-{decl}
-    /* TODO: replace with a real correctness check. A candidate that "passes"
-       here but isn't actually correct will happily get evolved for speed at
-       correctness's expense -- see README.md's note on keeping the check
-       trustworthy. */
+
+    /* TODO: a real correctness check -- see README.md on keeping this out
+       of reach of the evolved code. */
     int correct = 1;
 
-    printf("{{\\"status\\": \\"%s\\", \\"metrics\\": {{\\"duration_ms\\": %f{fmt}}}%s}}\\n",
-           correct ? "ok" : "error", duration_ms{arg},
-           correct ? "" : ", \\"message\\": \\"TODO: describe the failure\\"");
+    oe_metrics_t metrics;
+    oe_metrics_init(&metrics);
+    oe_metrics_add(&metrics, "duration_ms", oe_timer_elapsed_ms(&t));
+{extra}
+    oe_report(correct, &metrics, correct ? "" : "TODO: describe the failure");
     return correct ? 0 : 1;
 }}
 """
 
 
 def render_python(name: str, preset: objectives.ObjectivePreset) -> str:
-    decl, frag = _extra_metric_py(preset)
-    return f"""import json
-import time
+    extra = _extra_metric_line_py(preset)
+    return f"""from openevolve_metrics import Timer, report, guarded
 
 
 # @evolve
 def solve():
-    # TODO: replace this with the code you want OpenEvolve to optimize. Keep
-    # the function signature stable -- OpenEvolve edits the body, not how
-    # it's called from main() below.
+    # TODO: your algorithm. Keep the signature stable.
     pass
 
 
 def main():
-    start = time.perf_counter()
-    solve()
-    duration_ms = (time.perf_counter() - start) * 1000
-{decl}
-    # TODO: replace with a real correctness check (e.g. compare a computed
-    # result against a known-good expected value). A candidate that "passes"
-    # here but isn't actually correct will happily get evolved for speed at
-    # correctness's expense -- see README.md's note on keeping the check
-    # trustworthy.
+    with Timer() as t:
+        solve()
+
+    # TODO: a real correctness check -- see README.md on keeping this out of
+    # reach of the evolved code.
     correct = True
 
-    result = {{"status": "ok" if correct else "error", "metrics": {{"duration_ms": duration_ms{frag}}}}}
-    if not correct:
-        result["message"] = "TODO: describe the failure"
-    print(json.dumps(result))
+    metrics = {{"duration_ms": t.elapsed_ms}}
+{extra}
+    report(
+        status="ok" if correct else "error",
+        metrics=metrics,
+        message=None if correct else "TODO: describe the failure",
+    )
 
 
 if __name__ == "__main__":
-    main()
+    guarded(main)
 """
 
 
@@ -195,17 +149,13 @@ def render_project_yaml(name: str, lang: str, preset: objectives.ObjectivePreset
         build_cmd = f'["python3", "-m", "py_compile", "src/main{ext}"]'
         run_cmd = f'["python3", "src/main{ext}"]'
 
-    return f"""# Scaffolded by scripts/new_project.py. See examples/matmul_cpp/project.yaml
-# for the full schema (workspace pooling, ccache, correctness.extra_checks) --
-# this starter only sets what's needed to get a first run working.
+    return f"""# See examples/matmul_cpp/project.yaml for the full schema
 name: {name}
 language: {lang}
 file_suffix: "{ext}"
 
 bundler:
   src_dir: src
-  # "all" pulls in every @evolve(<group>) tag plus untagged ("universal")
-  # blocks. Narrow this once you're tagging more than one logical group.
   group: all
 
 build:
@@ -217,10 +167,10 @@ run:
   timeout_sec: 30
 
 workspace:
-  mode: ephemeral  # switch to "pool" once builds are slow enough to want incremental reuse -- see examples/matmul_cpp/project.yaml
+  mode: ephemeral  # "pool" once builds are slow enough to want incremental reuse
 
 scoring:
-  # Objective preset: {preset.name} -- {preset.description}
+  # preset: {preset.name} -- {preset.description}
   primary_metric: {preset.metric_name}
   mode: {preset.mode}
   scale: {preset.scale}
@@ -233,15 +183,11 @@ def render_config_yaml(name: str, lang: str, preset: objectives.ObjectivePreset,
 file_suffix: "{ext}"
 language: "{lang}"
 
-# NOTE: diff_based_evolution and max_iterations must be top-level fields, not
-# nested under an "evolution:" key -- OpenEvolve's config loader (dacite)
-# silently drops unrecognized keys instead of erroring, so a stray "evolution:"
-# section here would appear to work while quietly having no effect at all.
+# must be top-level, not nested under "evolution:" -- OpenEvolve silently
+# ignores unrecognized keys instead of erroring
 diff_based_evolution: true
 max_iterations: 100
-# Keep <= max_iterations, or the visualizer waits forever for a
-# checkpoints/ directory that's never written (default is 100).
-checkpoint_interval: 10
+checkpoint_interval: 10  # keep <= max_iterations or the visualizer never sees a checkpoint (default 100)
 
 llm:
   api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -257,7 +203,7 @@ database:
   num_islands: 2
 
 evaluator:
-  cascade_evaluation: false  # flip to true once you add correctness.extra_checks to project.yaml (see examples/matmul_cpp)
+  cascade_evaluation: false  # flip on once you add correctness.extra_checks to project.yaml
   parallel_evaluations: 2
 """
 

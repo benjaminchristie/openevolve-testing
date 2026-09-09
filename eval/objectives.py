@@ -1,20 +1,10 @@
-"""Named objective presets shared by scripts/new_project.py and (eventually)
-the per-language metrics-reporting helpers.
+"""Named objective presets for project.yaml's scoring: block, so common cases
+don't need primary_metric/mode/scale derived by hand. A project.yaml can
+still override any of them directly.
 
-Writing a project.yaml `scoring:` block by hand means deriving the right
-primary_metric/mode/scale combination yourself every time. These presets are
-just that derivation done once, for the shapes of objective that actually
-come up in practice -- wall-clock time, an ML-style loss, an accuracy or
-success-rate fraction, throughput. Pick the closest one; you're never locked
-in, since a project.yaml can always override primary_metric/mode/scale
-directly instead of (or after) using a preset.
-
-See harness.py's _score_from_metrics for how mode/scale turn a raw metric
-value into the scalar score OpenEvolve optimizes:
-  - "minimize": score = scale / (value + eps)  -- for costs like time or loss,
-    where smaller is better and there's no natural upper bound.
-  - "maximize": score = value  -- for fractions/rates that are already
-    naturally bounded (e.g. accuracy in [0, 1]), where scale isn't needed.
+See harness.py's _score_from_metrics: "minimize" -> scale / (value + eps),
+"maximize" -> value (no scale needed for an already-bounded metric like
+accuracy in [0, 1]).
 """
 from __future__ import annotations
 
@@ -28,10 +18,6 @@ class ObjectivePreset:
     metric_name: str
     mode: str  # "minimize" | "maximize"
     scale: float
-    # Name of the eval.metrics reporter method this preset expects to have
-    # supplied `metric_name` (see phase 2: the metrics-reporting helper).
-    # Purely documentation until that helper exists; not read by anything yet.
-    reporter_hint: str
 
 
 PRESETS = {
@@ -41,7 +27,6 @@ PRESETS = {
         metric_name="duration_ms",
         mode="minimize",
         scale=10000.0,
-        reporter_hint="timer() / elapsed_ms()",
     ),
     "minimize_loss": ObjectivePreset(
         name="minimize_loss",
@@ -49,7 +34,6 @@ PRESETS = {
         metric_name="loss",
         mode="minimize",
         scale=100.0,
-        reporter_hint="report(metrics={\"loss\": ...})",
     ),
     "maximize_accuracy": ObjectivePreset(
         name="maximize_accuracy",
@@ -57,7 +41,6 @@ PRESETS = {
         metric_name="accuracy",
         mode="maximize",
         scale=1.0,
-        reporter_hint="report(metrics={\"accuracy\": ...})",
     ),
     "maximize_success_rate": ObjectivePreset(
         name="maximize_success_rate",
@@ -65,7 +48,6 @@ PRESETS = {
         metric_name="success_rate",
         mode="maximize",
         scale=1.0,
-        reporter_hint="report(metrics={\"success_rate\": ...})",
     ),
     "maximize_throughput": ObjectivePreset(
         name="maximize_throughput",
@@ -73,7 +55,6 @@ PRESETS = {
         metric_name="throughput",
         mode="maximize",
         scale=1.0,
-        reporter_hint="report(metrics={\"throughput\": ...})",
     ),
 }
 

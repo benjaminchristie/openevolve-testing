@@ -1,5 +1,4 @@
-import json
-import time
+from openevolve_metrics import Timer, report, guarded
 
 
 # @evolve
@@ -19,23 +18,18 @@ def main():
     A = [1.0] * (N * N)
     B = [2.0] * (N * N)
 
-    start = time.perf_counter()
-    C = matrix_multiply(A, B, N)
-    duration_ms = (time.perf_counter() - start) * 1000
+    with Timer() as t:
+        C = matrix_multiply(A, B, N)
 
     expected = N * 1.0 * 2.0
     correct = all(abs(v - expected) < 1e-6 for v in C)
 
-    # Same one-JSON-line-on-stdout contract as every other project.yaml-driven
-    # project (see eval/harness.py) -- this is what makes the harness generic
-    # across languages: any language that can print a line of text can honor
-    # this same contract, so eval/harness.py doesn't need to know Python from
-    # C++ from anything else.
-    result = {"status": "ok" if correct else "error", "metrics": {"duration_ms": duration_ms}}
-    if not correct:
-        result["message"] = "result did not match expected value"
-    print(json.dumps(result))
+    report(
+        status="ok" if correct else "error",
+        metrics={"duration_ms": t.elapsed_ms},
+        message=None if correct else "result did not match expected value",
+    )
 
 
 if __name__ == "__main__":
-    main()
+    guarded(main)

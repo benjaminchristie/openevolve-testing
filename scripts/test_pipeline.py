@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
 """End-to-end regression test for the bundler + eval harness pipeline.
+No LLM, no Docker, no API key required. Run after changing bundler/ or eval/,
+or after scaffolding a new examples/<name>/ project.
 
-No LLM, no Docker, no API key required -- this only exercises the parts of the
-system we actually control (bundler extract/inject, eval/harness.py's
-isolated-workspace evaluation, the cascade stages). Run it after any change to
-bundler/ or eval/, or before wiring up a new examples/<name>/ project, to
-confirm the pipeline still behaves correctly.
-
-What it checks, for every examples/<name>/ with a project.yaml:
-  - `bundler --mode extract` + `--mode inject` round-trip the project's own
-    source byte-for-byte when nothing changed (bundler's own self-hosting
-    round-trip is checked the same way, directly on bundler/src/main.cpp).
-  - evaluate_stage1/2/3 and the plain evaluate() all succeed on the untouched
-    baseline bundle.
-  - evaluation never mutates the real project source (hashed before/after).
-  - a deliberately corrupted candidate fails cleanly (no crash, passed=False)
-    rather than silently doing nothing or hanging.
-  - no leftover workspace/build artifacts are left behind afterwards.
+For every examples/<name>/: round-trips extract/inject (and bundler's own
+self-hosting round-trip on bundler/src/main.cpp), runs all cascade stages on
+the baseline, confirms evaluation never mutates the real source, and confirms
+a corrupted candidate fails cleanly instead of crashing or hanging.
 
 Usage: python3 scripts/test_pipeline.py [--keep-build]
-  --keep-build: don't rebuild the bundler binary if one already exists (faster
-                re-runs; omit this the first time or after editing bundler/).
+  --keep-build: skip rebuilding the bundler binary if one already exists.
 """
 from __future__ import annotations
 
@@ -73,9 +62,7 @@ def ensure_bundler_built(keep_build: bool) -> bool:
 
 
 def test_bundler_self_hosting_roundtrip() -> None:
-    """Extracts and reinjects the bundler's own source on a scratch copy --
-    the case that originally surfaced the false-boundary parsing bug, since
-    extract_blocks' own body contains the literal delimiter text it writes."""
+    """Extracts and reinjects the bundler's own source on a scratch copy."""
     with tempfile.TemporaryDirectory(prefix="bundler_selftest_") as td:
         td = Path(td)
         (td / "src").mkdir()
@@ -102,11 +89,8 @@ def test_bundler_self_hosting_roundtrip() -> None:
 
 
 def make_broken_bundle(bundle_path: Path, out_path: Path) -> bool:
-    """Corrupts the first block's body with a language-agnostic garbage line,
-    without needing to know anything about the specific project's source --
-    this should break compilation/parsing in virtually any language while
-    still round-tripping through bundler --mode inject cleanly (inject only
-    cares about the delimiter lines, not what's between them)."""
+    """Inserts a garbage line into the first block's body -- breaks
+    compilation in any language without needing to know the source."""
     lines = bundle_path.read_text().splitlines()
     try:
         idx = next(i for i, l in enumerate(lines) if "OPENEVOLVE_BLOCK" in l and "id=" in l)
@@ -130,7 +114,7 @@ def test_example(example_dir: Path) -> None:
     os.environ["OPENEVOLVE_PROJECT_DIR"] = str(example_dir)
     for mod in ("evaluator", "harness"):
         sys.modules.pop(mod, None)
-    import evaluator  # noqa: E402  (fresh import per example, see reload above)
+    import evaluator  # noqa: E402 -- fresh import per example
 
     prep = subprocess.run(
         [sys.executable, str(EVAL_DIR / "prepare.py"), str(example_dir)],
@@ -150,10 +134,7 @@ def test_example(example_dir: Path) -> None:
     check(f"{name}: stage2 passes on baseline", isinstance(s2, dict) and s2.get("passed") is True, str(s2))
 
     s3 = evaluator.evaluate_stage3(str(bundle_path))
-    # Not "score > 0": a "maximize" objective (e.g. accuracy) legitimately
-    # scores exactly 0 for an honest, not-yet-filled-in stub -- that's
-    # correct behavior, not a failure. "passed" is what actually signals a
-    # successful evaluation regardless of scoring mode/sign.
+    # not "score > 0": an unfilled "maximize" stub (e.g. accuracy) legitimately scores 0
     check(
         f"{name}: stage3 evaluates the baseline successfully",
         isinstance(s3, dict) and s3.get("passed") is True,

@@ -1,12 +1,9 @@
-"""Runs `bundler --mode extract` for a project, producing the paired
-(initial bundle, map.json) that OpenEvolve starts evolving from and that every
-later `evaluate()` call injects candidates back against for the rest of that
-run. Run this once per project before starting OpenEvolve; re-run it (which
-mints a fresh random block-delimiter token, see bundler/src/main.cpp) only when
-the project's @evolve-tagged source has actually changed.
+"""Runs `bundler --mode extract`, producing the (bundle, map.json) pair that
+OpenEvolve evolves from and every evaluate() call injects candidates against.
+Run once per project before starting OpenEvolve; re-run only if the
+@evolve-tagged source changed.
 
 Usage: python3 prepare.py <project_dir>
-Prints the path to the initial bundle file OpenEvolve should be pointed at.
 """
 import subprocess
 import sys

@@ -2,20 +2,11 @@ log_level: "INFO"
 file_suffix: ".cpp"
 language: "cpp"
 
-# NOTE: diff_based_evolution and max_iterations must be top-level fields, not
-# nested under an "evolution:" key -- OpenEvolve's config loader (dacite)
-# silently drops unrecognized keys instead of erroring, so a stray "evolution:"
-# section here would appear to work while quietly having no effect at all.
+# must be top-level, not nested under "evolution:" -- OpenEvolve silently
+# ignores unrecognized keys instead of erroring
 diff_based_evolution: true
 max_iterations: 10
-# Defaults to 100 if unset. The visualizer service waits for
-# openevolve_output/<example>/checkpoints/ to exist -- if checkpoint_interval
-# is greater than max_iterations (e.g. the default 100 against a quick
-# max_iterations: 10 smoke test), no checkpoint is ever written and the
-# visualizer waits forever even though the run itself completes normally.
-# Keep this <= max_iterations whenever you lower max_iterations for a
-# quick test.
-checkpoint_interval: 10
+checkpoint_interval: 10  # keep <= max_iterations or the visualizer never sees a checkpoint (default 100)
 
 llm:
   api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -27,21 +18,10 @@ llm:
     You may use techniques such as loop tiling/blocking, vectorization/SIMD instructions, cache-friendly memory access patterns, or compiler hints (#pragma GCC optimize).
     Do not change the function signature or break program correctness.
 
-# NOTE: this is the real field name (not "island_count", which is also
-# silently dropped -- see above).
 database:
-  num_islands: 2
+  num_islands: 2  # real field name; "island_count" is silently ignored
 
 evaluator:
   cascade_evaluation: true
-  # Only thresholds [0] and [1] are actually used (gating stage1->stage2 and
-  # stage2->stage3). eval/evaluator.py's stage1/stage2 report a correctness
-  # fraction in [0, 1], so requiring the full 1.0 means any correctness
-  # failure -- including a failed extra_checks entry in project.yaml, e.g. the
-  # ASan/UBSan build -- blocks a candidate from ever reaching the (expensive)
-  # stage3 benchmark.
-  cascade_thresholds: [1.0, 1.0]
-  # Match examples/matmul_cpp/project.yaml's workspace.pool_size so every
-  # concurrently-evaluated candidate gets its own persistent pool slot instead
-  # of contending for one.
-  parallel_evaluations: 2
+  cascade_thresholds: [1.0, 1.0]  # require full correctness before stage3
+  parallel_evaluations: 2  # match project.yaml's workspace.pool_size

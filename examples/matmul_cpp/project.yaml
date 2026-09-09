@@ -1,6 +1,4 @@
-# Declarative spec consumed by eval/harness.py. This is what makes the harness
-# reusable across projects/languages: only this file (plus build/run commands)
-# changes per project, the evaluation mechanics in eval/harness.py do not.
+# Declarative spec consumed by eval/harness.py
 name: matmul_cpp
 language: cpp
 file_suffix: ".cpp"
@@ -14,21 +12,11 @@ bundler:
   group: all
 
 build:
-  # ccache, used opportunistically: same compiler invocation either way, but
-  # when ccache is installed, object files get cached by preprocessed-source
-  # content, so a rebuild of unchanged code (e.g. across cascade stages, or
-  # across pool workspace slots) is a near-instant hit instead of a real
-  # compile. See cache_env below and _build_env_for in harness.py (it also
-  # sets CCACHE_BASEDIR per-workspace automatically). Falls back to a plain
-  # g++ invocation when ccache isn't on PATH, so this project.yaml still
-  # works out of the box on a machine that hasn't installed it.
+  # ccache, used opportunistically
   cmd: ["sh", "-c", "$(command -v ccache) g++ -O2 -std=c++17 src/main.cpp -o matmul_bin"]
   timeout_sec: 60
   cache_env:
-    # Relative path: resolved by the harness against this project's own
-    # directory (stable, never copied into a workspace), so the cache is
-    # shared across every ephemeral workspace / pool slot without needing a
-    # hardcoded absolute path here.
+    # Relative path
     CCACHE_DIR: .ccache
 
 run:
@@ -37,10 +25,7 @@ run:
 
 correctness:
   # Every command here must exit 0 as part of the stage2 cascade gate (see
-  # eval/evaluator.py's evaluate_stage2). This is where language- or
-  # project-specific hardening lives -- a sanitizer build for C/C++, a type
-  # checker for Python, `cargo clippy` for Rust, etc. -- without harness.py
-  # needing to know anything about any of them.
+  # eval/evaluator.py's evaluate_stage2).
   extra_checks:
     - name: asan_ubsan
       cmd: ["sh", "-c", "$(command -v ccache) g++ -O1 -g -fsanitize=address,undefined -std=c++17 src/main.cpp -o matmul_asan && ./matmul_asan"]
@@ -49,10 +34,7 @@ correctness:
 workspace:
   # "pool" reuses a fixed number of persistent workspace slots (each keeping
   # its own build/ directory across evaluations) instead of a fresh tempdir
-  # per candidate, so incremental builds actually apply. Only the files the
-  # bundler ever touches (from map.json) are reset to pristine before each
-  # inject -- see _restore_pristine in harness.py. Match pool_size to
-  # config.yaml's evaluator.parallel_evaluations.
+  # per candidate
   mode: pool
   pool_size: 2
 

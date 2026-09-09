@@ -12,10 +12,7 @@ bool contains(const std::vector<std::string>& v, const std::string& s) {
 }
 }  // namespace
 
-// Language registry: add a grammar to CMakeLists.txt (add_tree_sitter_grammar)
-// and one entry here to extend the bundler to another language. Everything
-// else in extraction/injection is written against LanguageSpec, not against
-// any specific grammar's node types.
+// add a language: one grammar in CMakeLists.txt (add_tree_sitter_grammar) + one entry here
 const std::vector<LanguageSpec>& language_registry() {
     static const std::vector<LanguageSpec> registry = {
         {
@@ -56,9 +53,7 @@ const LanguageSpec* language_for_extension(const std::string& extension) {
     return nullptr;
 }
 
-// Generates a per-run random token so block delimiters can never collide with
-// literal text that happens to appear inside evolved code (e.g. a function
-// that itself builds strings containing the word "BLOCK_ID:").
+// per-run random token so block delimiters can't collide with text inside evolved code
 std::string generate_run_token() {
     std::random_device rd;
     std::mt19937_64 gen(rd());
@@ -145,11 +140,9 @@ TSNode get_associated_function_node(TSNode comment_node, const LanguageSpec& lan
 }
 
 TSNode get_function_name_node(TSNode node, const LanguageSpec& lang) {
-    // If this is a wrapper (e.g. Python's decorated_definition, C++'s
-    // template_declaration), look up the name on the actual block node inside
-    // it, not by recursing from the wrapper's own top -- otherwise a
-    // decorator's own identifier (e.g. "staticmethod" in @staticmethod) gets
-    // found first and mistaken for the function's name.
+    // for a wrapper (Python's decorated_definition, C++'s template_declaration), look up
+    // the name on the block node inside it -- else a decorator's own identifier
+    // (e.g. "staticmethod" in @staticmethod) gets mistaken for the function's name
     std::string node_type = ts_node_type(node);
     if (contains(lang.wrapper_node_types, node_type)) {
         uint32_t wrapper_child_count = ts_node_child_count(node);
@@ -163,14 +156,11 @@ TSNode get_function_name_node(TSNode node, const LanguageSpec& lang) {
         return {};
     }
 
-    // Fast, language-agnostic path: most grammars (Python, plain C
-    // declarations) expose the declared name directly via a "name" field.
+    // fast path: most grammars expose the name directly via a "name" field
     TSNode name_field = ts_node_child_by_field_name(node, "name", static_cast<uint32_t>(strlen("name")));
     if (!ts_node_is_null(name_field)) return name_field;
 
-    // Fallback for grammars where the name is nested inside a declarator
-    // chain instead (C/C++ pointer/reference/template return types, function
-    // pointers, ...), which have no single top-level "name" field to read.
+    // fallback: name is nested in a declarator chain (C/C++ pointer/template return types, ...)
     std::string type = ts_node_type(node);
     if (type == "identifier" || type == "field_identifier" || type == "destructor_name") {
         return node;
@@ -195,11 +185,8 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
     std::vector<std::string> mangled_snippets;
     std::set<std::tuple<std::string, size_t, size_t>> seen_function_ranges;
     std::set<std::string> languages_seen;
-    // The comment style used for the bundle's own markers/delimiters: taken
-    // from whichever language the first extracted block belongs to, so the
-    // generated bundle stays syntactically valid source (a Python bundle gets
-    // "#"-prefixed markers, not C-style "//"). Irrelevant when mixing
-    // languages in one bundle -- that already triggers the warning below.
+    // comment style for the bundle's own markers, taken from the first block's language
+    // (keeps a Python bundle valid Python, not C-style "//")
     std::string bundle_comment_prefix = "//";
     bool bundle_comment_prefix_set = false;
 
@@ -302,8 +289,6 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
 
     for (size_t i = 0; i < metadata_list.size(); ++i) {
         const auto& meta = metadata_list[i];
-        // The token makes this delimiter line effectively impossible to collide
-        // with literal text inside the evolved code itself (see generate_run_token).
         bundle_stream << cp << " >>> OPENEVOLVE_BLOCK token=" << run_token << " id=" << meta.id
                       << " group=" << meta.group_id << " file=" << meta.file_path << " <<<\n";
         bundle_stream << mangled_snippets[i] << "\n\n";
@@ -358,15 +343,9 @@ void inject_blocks(const std::string& bundle_in, const std::string& map_in) {
         throw std::runtime_error("Map file is missing required 'token'/'blocks' fields (stale format?).");
     }
     std::string run_token = json_map["token"];
-    // Older maps predate this field: "//" matches every bundle written before
-    // multi-language support existed, which were always C/C++.
-    std::string comment_prefix = json_map.value("comment_prefix", "//");
+    std::string comment_prefix = json_map.value("comment_prefix", "//");  // older maps predate this field, always "//"
     const json& blocks_json = json_map["blocks"];
 
-    // Only a line that starts with exactly this token-qualified prefix is treated as a
-    // block delimiter, so evolved code containing similar-looking text can never be
-    // misparsed as a boundary (see generate_run_token in extract_blocks). Neither "//"
-    // nor "#" contain regex metacharacters, so the prefix can be interpolated directly.
     std::string delimiter_prefix = comment_prefix + " >>> OPENEVOLVE_BLOCK token=" + run_token + " id=";
     std::regex id_regex("^" + comment_prefix + R"( >>> OPENEVOLVE_BLOCK token=[0-9a-f]+ id=(\d+))");
     std::string end_marker = comment_prefix + " EVOLVE-BLOCK-END";
@@ -381,18 +360,12 @@ void inject_blocks(const std::string& bundle_in, const std::string& map_in) {
     while (std::getline(stream, line)) {
         std::string trimmed = trim(line);
         std::smatch match;
-        // Both checks are anchored to the start of the (trimmed) line rather than
-        // matching the delimiter text anywhere within it -- otherwise a block whose own
-        // source code happens to contain this literal text as part of a larger statement
-        // (e.g. bundler evolving itself) would be misparsed as a boundary.
+        // anchored to line start, not matched anywhere in the line -- otherwise a
+        // block whose own source contains this text (e.g. bundler evolving itself)
+        // gets misparsed as a boundary
         if (trimmed.rfind(delimiter_prefix, 0) == 0 && std::regex_search(trimmed, match, id_regex)) {
             if (current_id != -1) {
-                // Trim trailing blank lines: the bundle writer inserts a blank-line
-                // separator ("\n\n") after every block purely for readability, and
-                // without stripping it here that separator would get spliced into the
-                // source file as real content on every single inject cycle, growing
-                // without bound across repeated evolve/inject iterations.
-                mutated_blocks[current_id] = trim(current_snippet.str());
+                mutated_blocks[current_id] = trim(current_snippet.str());  // trim: drop the blank-line separator
                 current_snippet.str("");
                 current_snippet.clear();
             }

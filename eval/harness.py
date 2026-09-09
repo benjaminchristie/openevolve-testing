@@ -1,49 +1,26 @@
-"""Generic, project-agnostic evaluation harness for OpenEvolve + the bundler tool.
+"""Project-agnostic evaluation harness for OpenEvolve + the bundler tool.
 
-Language-agnostic by design: every piece of project-specific knowledge (how to
-build, how to run, what "correct" means, which grammar the bundler should use)
-comes from that project's project.yaml. Nothing in this file assumes C++, or
-any other single language -- see examples/matmul_cpp/project.yaml for a worked
-C++ example; a Python or Rust project needs a different project.yaml, not a
-different harness.
+Everything project-specific -- how to build, how to run, what counts as
+correct -- comes from that project's project.yaml, so nothing here assumes a
+particular language.
 
-"Evaluate one candidate" is:
-    1. get a workspace holding a pristine copy of the project (ephemeral or a
-       reused pool slot -- see below), never touching the real project tree,
-    2. splice the candidate bundle back into it with `bundler --mode inject`,
-       using the *original* map.json produced when extraction happened,
-    3. run the project's own build/run commands inside that workspace,
-    4. parse a single JSON status line the run command prints to stdout,
-    5. turn it into an OpenEvolve-compatible metrics dict.
+evaluate_candidate() does, per call:
+    1. get a workspace with a pristine copy of the project (ephemeral or a
+       reused pool slot, see below) without touching the real project
+    2. splice the candidate bundle in via `bundler --mode inject`
+    3. run the project's build/run commands there
+    4. parse the JSON status line the run prints to stdout into a score
 
-Two workspace strategies (project.yaml: workspace.mode):
-  - "ephemeral" (default): fresh tempdir per evaluation, deleted afterwards.
-    Simplest and safest; fine for small/fast-building projects.
-  - "pool": a fixed number of persistent slot directories, reused across
-    evaluations instead of recreated. Each slot keeps its own build/ directory
-    intact between evaluations so incremental builds (Ninja/Make/Cargo dep
-    tracking) actually apply, not just from-scratch builds every time. Only
-    the specific source files the bundler ever touches (from map.json) are
-    reset to pristine before each inject -- see _restore_pristine. Slots are
-    guarded by cross-process file locks because OpenEvolve evaluates in
-    parallel via a real ProcessPoolExecutor (separate OS processes), not
-    threads, so an in-memory lock would not coordinate between them.
+workspace.mode:
+  - "ephemeral" (default): fresh tempdir per evaluation, deleted after.
+  - "pool": a fixed number of slot dirs reused across evaluations, so
+    incremental builds and a shared ccache (build.cache_env) actually help.
+    Slots are locked with flock since OpenEvolve evaluates across separate
+    processes, not threads.
 
-Independently of workspace strategy, project.yaml's build.cache_env can wire
-in a compiler object cache (ccache/sccache): set CCACHE_DIR to a location
-that's shared across every workspace (never inside one that gets deleted).
-This is what actually saves time across cascade stages (see below), since
-stage1/stage2/stage3 are separate calls into this module with no workspace of
-their own in common -- ccache is keyed by preprocessed-source content, not by
-directory, so a rebuild of unchanged code across stages or across pool slots
-is a cache hit regardless. The harness sets CCACHE_BASEDIR to the current
-workspace automatically, since ccache's cache key can otherwise be sensitive
-to the (per-workspace, non-reproducible) absolute path.
-
-Cascade evaluation (OpenEvolve's evaluator.cascade_evaluation): the exported
-evaluate_stage1/2/3 functions call evaluate_candidate(..., stage=...) so a
-cheap correctness check runs before an expensive benchmark ever does. See
-eval/evaluator.py.
+Cascade evaluation: evaluator.py's evaluate_stage1/2/3 call
+evaluate_candidate(..., stage=...) so a cheap check runs before an
+expensive benchmark does.
 """
 from __future__ import annotations
 
@@ -109,9 +86,7 @@ class ProjectSpec:
         workspace_cfg = data.get("workspace", {})
 
         build_env = dict(build_cfg.get("cache_env", {}))
-        # Relative CCACHE_DIR is resolved against the project (stable, never
-        # copied into a workspace) so a shared cache works out of the box
-        # without a hardcoded absolute path in a checked-in project.yaml.
+        # resolve a relative CCACHE_DIR against the project dir, not a workspace
         if "CCACHE_DIR" in build_env and not os.path.isabs(build_env["CCACHE_DIR"]):
             cache_dir = (project_dir / build_env["CCACHE_DIR"]).resolve()
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -128,11 +103,7 @@ class ProjectSpec:
             project_dir=project_dir,
             name=data["name"],
             language=data["language"],
-            # Separate from `language` on purpose (mirrors OpenEvolve's own
-            # config.yaml, which has both a `language` and a `file_suffix`
-            # top-level field): "python" as a language name doesn't imply
-            # ".python" as a file extension.
-            file_suffix=data.get("file_suffix", "." + data["language"]),
+            file_suffix=data.get("file_suffix", "." + data["language"]),  # naive fallback; set explicitly when it's wrong (e.g. python -> .py)
             bundler_src_dir=bundler_cfg["src_dir"],
             bundler_group=bundler_cfg.get("group", "all"),
             map_file=bundler_cfg.get("map_file", "build/map.json"),
@@ -162,9 +133,8 @@ class EvalOutcome:
     stderr_tail: Optional[str] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        # Both keys are populated: "combined_score" is what OpenEvolve's cascade
-        # threshold check (_passes_threshold) looks for; "score" is kept for the
-        # simple non-cascade `evaluator=lambda path: {"score": ...}` convention.
+        # "combined_score" is what OpenEvolve's cascade threshold check reads;
+        # "score" is for the plain non-cascade convention.
         result: Dict[str, Any] = {
             "combined_score": self.combined_score,
             "score": self.combined_score,
@@ -177,10 +147,8 @@ class EvalOutcome:
 
 
 def _default_bundler_bin() -> Path:
-    # Our Docker image builds the bundler once at image-build time into a path
-    # outside the repo bind mount (see Dockerfile) -- the bind mount would
-    # otherwise shadow anything COPY'd to the repo-relative path below, so the
-    # image sets this env var rather than relying on the fallback.
+    # the Docker image sets BUNDLER_BIN to a path outside the bind mount (see
+    # Dockerfile) since the mount would shadow anything built at the repo path below
     override = os.environ.get("BUNDLER_BIN")
     if override:
         return Path(override)
@@ -222,9 +190,7 @@ def _acquire_slot(pool_root: Path, pool_size: int) -> Iterator[int]:
         except BlockingIOError:
             os.close(candidate_fd)
     if fd is None:
-        # Every slot is busy right now: block on slot 0 rather than erroring
-        # out, so a burst of concurrent evaluations still makes progress
-        # (just serialized past the configured pool size).
+        # all slots busy: block on slot 0 rather than erroring out
         chosen = 0
         fd = os.open(str(pool_root / "slot_0.lock"), os.O_CREAT | os.O_RDWR)
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -265,9 +231,7 @@ def _workspace(spec: ProjectSpec, map_path: Path) -> Iterator[Path]:
             _ensure_slot_initialized(slot_dir, spec, map_path, tagged_files)
             _restore_pristine(slot_dir, tagged_files)
             yield slot_dir
-            # slot_dir (including its build/ dir) is deliberately left in
-            # place for the next evaluation to reuse -- that reuse is the
-            # entire point of pool mode.
+            # slot_dir is left in place on purpose, for the next evaluation to reuse
     elif spec.workspace_mode == "ephemeral":
         workspace = Path(tempfile.mkdtemp(prefix=f"openevolve_eval_{spec.name}_"))
         try:
@@ -284,10 +248,22 @@ def _workspace(spec: ProjectSpec, map_path: Path) -> Iterator[Path]:
         raise ValueError(f"unknown workspace.mode '{spec.workspace_mode}' (expected 'ephemeral' or 'pool')")
 
 
+_PYLIB_DIR = Path(__file__).resolve().parent / "pylib"
+_INCLUDE_DIR = Path(__file__).resolve().parent / "include"
+
+
+def _prepend_path_var(env: Dict[str, str], var: str, path: Path) -> None:
+    existing = env.get(var, "")
+    env[var] = str(path) if not existing else f"{path}{os.pathsep}{existing}"
+
+
 def _build_env_for(spec: ProjectSpec, workspace: Path) -> Dict[str, str]:
     env = {**os.environ, **spec.build_env}
     if "CCACHE_DIR" in spec.build_env:
         env.setdefault("CCACHE_BASEDIR", str(workspace))
+    # lets any project `import openevolve_metrics` / `#include <openevolve_metrics.hpp>`
+    _prepend_path_var(env, "PYTHONPATH", _PYLIB_DIR)
+    _prepend_path_var(env, "CPATH", _INCLUDE_DIR)
     return env
 
 
