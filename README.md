@@ -27,9 +27,9 @@ Or skip the review and apply the winner automatically: `AUTO_APPLY=1 docker comp
 
 ### Using a local Ollama model
 
-`ollama` doesn't start by default -- there's no reason to if `project.yaml`'s `llm.api_base`
-points at a remote provider like every current example does. Only bring it up if you actually
-set `api_base` to Ollama's endpoint:
+`ollama` doesn't start by default -- there's no reason to when `project.yaml`'s `llm.api_base`
+points at a remote provider, which is what all three bundled examples do. Only bring it up if
+you actually set `api_base` to Ollama's endpoint:
 
 ```sh
 COMPOSE_PROFILES=ollama docker compose up
