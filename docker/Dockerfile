@@ -1,14 +1,9 @@
-# Self-contained image for this repo's OpenEvolve + bundler pipeline: builds
-# our openevolve fork, the bundler binary, and the eval harness once, at image
-# build time. Only the project being evolved is bind-mounted at runtime
-# (docker-compose.yml) -- it can be any directory on the host with a
-# project.yaml, not just something living inside this repo.
+# Builds openevolve, the bundler, and the eval harness once at image build time.
+# Only the project being evolved is bind-mounted at runtime (docker-compose.yml),
+# and can be any directory on the host with a project.yaml.
 #
-# Build context is the repo root (see docker-compose.yml's build.context),
-# not this docker/ directory -- every path below is relative to that root.
-#
-# Requires third_party/openevolve to be checked out first:
-#   git submodule update --init
+# Build context is the repo root, so paths below are relative to that, not
+# this docker/ directory. Requires `git submodule update --init` first.
 
 FROM python:3.12-slim
 

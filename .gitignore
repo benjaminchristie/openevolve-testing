@@ -6,9 +6,6 @@ build
 .eval_workspaces
 .ccache
 
-# each project's OpenEvolve run config now lives in its own project.yaml
-# (see examples/*/project.yaml); these predate that and are superseded, kept
-# locally only in case anything still points at them
 config/config.yaml
 config/matmul_cpp.yaml
 config/matmul_py.yaml

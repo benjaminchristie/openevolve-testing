@@ -58,11 +58,9 @@ def main() -> int:
     bundler_bin = _default_bundler_bin()
     tagged_files = _load_tagged_files(map_path)
 
-    # map.json's byte offsets are only valid against the file content that existed
-    # at extraction time -- inject against whatever's currently in project_dir
-    # would corrupt the result the moment it's not pristine anymore (e.g. a
-    # previous finalize --apply already changed a file's length). prepare.py
-    # snapshots that exact content here for exactly this reason.
+    # map.json's byte offsets are only valid against the pristine content prepare.py
+    # snapshotted -- injecting against project_dir directly would corrupt the result
+    # once a prior finalize --apply has already changed a file's length.
     pristine_dir = map_path.parent / "pristine"
     if not pristine_dir.exists():
         raise SystemExit(f"{pristine_dir} not found -- re-run eval/prepare.py for this project first")

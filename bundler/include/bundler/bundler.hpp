@@ -18,17 +18,15 @@ extern "C" const TSLanguage *tree_sitter_cpp();
 extern "C" const TSLanguage *tree_sitter_c();
 extern "C" const TSLanguage *tree_sitter_python();
 
-// Everything the bundler needs to know about one language. To add a
-// language: one entry here (see language_registry() in main.cpp) plus its
-// grammar in CMakeLists.txt.
+// To add a language: one entry in language_registry() (main.cpp) plus its grammar in CMakeLists.txt
 struct LanguageSpec {
 	std::string name;
 	std::vector<std::string> extensions;
 	const TSLanguage *(*get_language)();
-	std::string line_comment_prefix;  // "//" for C/C++, "#" for Python
+	std::string line_comment_prefix;
 	std::vector<std::string> block_node_types;  // e.g. {"function_definition"}
 	std::vector<std::string> wrapper_node_types;  // e.g. C++ templates, Python decorators
-	std::vector<std::string> name_search_skip_types;  // get_function_name_node's fallback path
+	std::vector<std::string> name_search_skip_types;  // used by get_function_name_node's fallback
 };
 
 struct BlockMetadata {

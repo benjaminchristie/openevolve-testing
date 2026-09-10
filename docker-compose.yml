@@ -25,9 +25,8 @@ services:
     image: openevolve-testing:local
     container_name: openevolve
     depends_on:
-      # optional: only actually starts if the "ollama" profile is active
-      # (COMPOSE_PROFILES=ollama or --profile ollama), which you only need if
-      # project.yaml's llm.api_base points at it
+      # only starts if the "ollama" profile is active -- needed only when
+      # project.yaml's llm.api_base points at Ollama
       ollama:
         condition: service_started
         required: false
@@ -38,9 +37,8 @@ services:
       # any directory with a project.yaml, e.g.: PROJECT_PATH=~/research/my_project
       - ${PROJECT_PATH:-./examples/matmul_cpp}:/project
     environment:
-      # required unless project.yaml's llm.api_base is Ollama -- checked (and
-      # given an Ollama-appropriate placeholder if unset) in
-      # docker/entrypoint-evolve.sh, which can actually see that config
+      # required unless project.yaml's llm.api_base is Ollama -- enforced in
+      # docker/entrypoint-evolve.sh, which can see that config
       - "OPENAI_API_KEY=${OPENAI_API_KEY:-}"
       - "OPENEVOLVE_PROJECT_DIR=/project"
       # set to anything non-empty to apply the winning result directly instead

@@ -103,7 +103,7 @@ class ProjectSpec:
             project_dir=project_dir,
             name=data["name"],
             language=data["language"],
-            file_suffix=data.get("file_suffix", "." + data["language"]),  # naive fallback; set explicitly when it's wrong (e.g. python -> .py)
+            file_suffix=data.get("file_suffix", "." + data["language"]),  # override when language name != extension, e.g. python -> .py
             bundler_src_dir=bundler_cfg["src_dir"],
             bundler_group=bundler_cfg.get("group", "all"),
             map_file=bundler_cfg.get("map_file", "build/map.json"),

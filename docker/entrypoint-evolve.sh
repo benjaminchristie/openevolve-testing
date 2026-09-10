@@ -4,11 +4,9 @@
 # for how it gets bind-mounted there).
 set -e
 
-# OPENAI_API_KEY is only actually required for a real remote provider -- a
-# local Ollama endpoint doesn't check it, it just wants some non-empty
-# string, so only fail here if project.yaml's own llm.api_base says
-# otherwise. Checked here rather than in docker-compose.yml, which can't see
-# the project's config to tell the two cases apart.
+# Ollama doesn't check OPENAI_API_KEY, it just wants some non-empty string --
+# so only require a real key when llm.api_base isn't Ollama. Checked here, not
+# in docker-compose.yml, since only this script can see project.yaml.
 NEEDS_REAL_KEY=$(python3 -c "
 import yaml
 with open('/project/project.yaml') as f:

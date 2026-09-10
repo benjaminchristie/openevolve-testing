@@ -66,8 +66,6 @@ add_tree_sitter_grammar(python https://github.com/tree-sitter/tree-sitter-python
 
 add_executable(bundler
     src/main.cpp
-    # src/extractor.cpp
-    # src/injector.cpp
 )
 
 target_include_directories(bundler PRIVATE

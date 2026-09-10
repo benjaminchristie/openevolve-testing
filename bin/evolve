@@ -1,14 +1,9 @@
 #!/bin/sh
 # Thin CLI around the openevolve-testing Docker image. Install by symlinking
-# this file onto your PATH, e.g.:
-#   ln -s "$(pwd)/bin/evolve" ~/.local/bin/evolve
-# or by adding this repo's bin/ directory to PATH directly in your shell rc.
+# this file onto your PATH: ln -s "$(pwd)/bin/evolve" ~/.local/bin/evolve
 #
-# `run` and `patch` only need the image to already be built (see `build`) --
-# they don't need this repo checked out at all beyond that, since the bundler,
-# the openevolve fork, and the eval harness are all baked into the image.
-# `init` and `build` do need it, to get at scripts/new_project.py and
-# docker-compose.yml respectively.
+# `run`/`patch` only need the built image (everything they need is baked in);
+# `init`/`build` need this repo checked out.
 set -e
 
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")

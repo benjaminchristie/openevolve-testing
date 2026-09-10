@@ -185,8 +185,7 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
     std::vector<std::string> mangled_snippets;
     std::set<std::tuple<std::string, size_t, size_t>> seen_function_ranges;
     std::set<std::string> languages_seen;
-    // comment style for the bundle's own markers, taken from the first block's language
-    // (keeps a Python bundle valid Python, not C-style "//")
+    // keeps a Python bundle valid Python instead of always using C-style "//"
     std::string bundle_comment_prefix = "//";
     bool bundle_comment_prefix_set = false;
 
@@ -219,8 +218,6 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
             if (std::regex_search(comment_text, match, evolve_regex)) {
                 std::string func_group = match[1].matched ? match[1].str() : "";
 
-                // Universal check: if func_group is empty, it belongs to ALL runs.
-                // Otherwise, verify group match.
                 bool is_universal = func_group.empty();
                 bool matches_group = target_group.empty() || target_group == "all" || func_group == target_group;
 
@@ -277,7 +274,7 @@ void extract_blocks(const std::string& src_dir, const std::string& bundle_out, c
 
     std::string run_token = generate_run_token();
 
-    const std::string& cp = bundle_comment_prefix;  // shorthand
+    const std::string& cp = bundle_comment_prefix;
     std::stringstream bundle_stream;
     bundle_stream << cp << " ==========================================\n";
     bundle_stream << cp << " AUTO-GENERATED BUNDLE FOR OPENEVOLVE\n";
