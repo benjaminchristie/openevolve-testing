@@ -9,9 +9,13 @@ finalize.py restores from this snapshot before injecting rather than trusting
 whatever's currently in the project (which might already have a previous
 finalize --apply in it).
 
+Set EVOLVE_GROUP to override project.yaml's bundler.group for this call
+(e.g. to extract just one @evolve(group) without editing the file).
+
 Usage: python3 prepare.py <project_dir>
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -31,13 +35,14 @@ def prepare(project_dir: Path) -> Path:
     map_path = project_dir / spec.map_file
     bundle_path = map_path.parent / f"bundle{spec.file_suffix}"
     map_path.parent.mkdir(parents=True, exist_ok=True)
+    group = os.environ.get("EVOLVE_GROUP") or spec.bundler_group
 
     result = subprocess.run(
         [str(bundler_bin), "--mode", "extract",
          "--src", spec.bundler_src_dir,
          "--bundle", str(bundle_path),
          "--map", str(map_path),
-         "--group", spec.bundler_group],
+         "--group", group],
         cwd=project_dir, capture_output=True, text=True,
     )
     if result.returncode != 0:

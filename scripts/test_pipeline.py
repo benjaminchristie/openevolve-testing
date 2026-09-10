@@ -117,7 +117,10 @@ def test_finalize(name: str, example_dir: Path, bundle_path: Path) -> None:
         scratch = Path(td) / "proj"
         shutil.copytree(example_dir, scratch)
         best_dir = scratch / "openevolve_output" / "best"
-        best_dir.mkdir(parents=True)
+        # exist_ok: the scratch copy may already have a real openevolve_output/
+        # from an actual run against this example -- fine to overwrite in the
+        # disposable copy, just don't let that collide with a bare mkdir
+        best_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(bundle_path, best_dir / f"best_program{bundle_path.suffix}")
         (best_dir / "best_program_info.json").write_text('{"iteration": 0, "metrics": {}}')
 

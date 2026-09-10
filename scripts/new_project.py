@@ -208,7 +208,7 @@ scoring:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("path", nargs="?", help="Directory to scaffold (created; can be anywhere)")
+    parser.add_argument("path", nargs="?", default=".", help="Directory to scaffold (default: current directory)")
     parser.add_argument("--language", choices=sorted(LANGUAGES), default="cpp")
     parser.add_argument("--objective", choices=sorted(objectives.PRESETS), default="minimize_time")
     parser.add_argument("--list-objectives", action="store_true", help="Print every objective preset and exit")
@@ -219,9 +219,6 @@ def main() -> int:
             print(f"{preset.name:24s} {preset.description}")
         return 0
 
-    if not args.path:
-        parser.error("the following arguments are required: path")
-
     project_dir = Path(args.path).resolve()
     name = project_dir.name
     if not NAME_RE.match(name):
@@ -231,17 +228,21 @@ def main() -> int:
     lang = args.language
     ext = LANGUAGES[lang]["ext"]
 
-    if project_dir.exists():
-        raise SystemExit(f"{project_dir} already exists -- pick a different path")
+    if (project_dir / "project.yaml").exists():
+        raise SystemExit(f"{project_dir} already has a project.yaml -- pick a different path")
 
-    (project_dir / "src").mkdir(parents=True)
-    (project_dir / "src" / f"main{ext}").write_text(RENDERERS[lang](preset))
+    (project_dir / "src").mkdir(parents=True, exist_ok=True)
+    src_file = project_dir / "src" / f"main{ext}"
+    if src_file.exists():
+        print(f"Note: {src_file} already exists, leaving it as-is.")
+    else:
+        src_file.write_text(RENDERERS[lang](preset))
     (project_dir / "project.yaml").write_text(render_project_yaml(name, lang, preset, ext))
 
     print(f"Scaffolded {project_dir} ({lang}, objective: {preset.name})")
     print("Next steps:")
     print(f"  1. Edit {project_dir}/src/main{ext} -- fill in solve() and the correctness check.")
-    print(f"  2. PROJECT_PATH={project_dir} UID=$(id -u) GID=$(id -g) docker compose up openevolve")
+    print(f"  2. cd {project_dir} && evolve run")
     return 0
 
 

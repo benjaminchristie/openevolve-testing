@@ -1,0 +1,79 @@
+#!/bin/sh
+# Thin CLI around the openevolve-testing Docker image. Install by symlinking
+# this file onto your PATH, e.g.:
+#   ln -s "$(pwd)/bin/evolve" ~/.local/bin/evolve
+# or by adding this repo's bin/ directory to PATH directly in your shell rc.
+#
+# `run` and `patch` only need the image to already be built (see `build`) --
+# they don't need this repo checked out at all beyond that, since the bundler,
+# the openevolve fork, and the eval harness are all baked into the image.
+# `init` and `build` do need it, to get at scripts/new_project.py and
+# docker-compose.yml respectively.
+set -e
+
+SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")
+REPO_ROOT=$(dirname "$(dirname "$SCRIPT_PATH")")
+IMAGE=openevolve-testing:local
+
+usage() {
+    cat <<'USAGE'
+usage: evolve <command> [args]
+
+commands:
+  build                build the Docker image (run once, and again after
+                        pulling changes to this repo)
+  init [path] [opts]    scaffold a new project (default: current directory)
+                        opts: --language cpp|c|python  --objective NAME
+                        (--list-objectives to see all objectives)
+  run [group]           run one evolve cycle against the current directory,
+                        optionally restricting to one @evolve(group)
+  patch [--apply]       (re-)deliver the last run's result: writes a
+                        reviewable patch by default, or applies it directly
+                        with --apply
+USAGE
+}
+
+require_image() {
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        echo "evolve: image '$IMAGE' not found -- run 'evolve build' first" >&2
+        exit 1
+    fi
+}
+
+cmd_build() {
+    (cd "$REPO_ROOT" && docker compose build openevolve)
+}
+
+cmd_init() {
+    python3 "$REPO_ROOT/scripts/new_project.py" "$@"
+}
+
+cmd_run() {
+    group="${1:-}"
+    require_image
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        -v "$(pwd)":/project \
+        -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+        -e "AUTO_APPLY=${AUTO_APPLY:-}" \
+        -e "EVOLVE_GROUP=$group" \
+        "$IMAGE"
+}
+
+cmd_patch() {
+    require_image
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        -v "$(pwd)":/project \
+        --entrypoint python3 \
+        "$IMAGE" /opt/openevolve_eval/finalize.py /project "$@"
+}
+
+case "${1:-}" in
+    build) shift; cmd_build "$@" ;;
+    init) shift; cmd_init "$@" ;;
+    run) shift; cmd_run "$@" ;;
+    patch) shift; cmd_patch "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *) echo "evolve: unknown command '$1'" >&2; usage >&2; exit 1 ;;
+esac
