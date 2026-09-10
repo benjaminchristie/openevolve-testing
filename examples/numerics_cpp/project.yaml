@@ -1,3 +1,7 @@
+# One file, two readers: OpenEvolve reads llm/database/evaluator/diff_based_evolution/etc,
+# eval/harness.py reads bundler/build/run/correctness/workspace/scoring. Each ignores
+# what it doesn't recognize, so this is safe to keep merged.
+#
 # Multi-file project: vector_ops.cpp + matrix_ops.cpp tagged @evolve(linalg),
 # sorting.cpp + searching.cpp tagged @evolve(sorting). group: all bundles
 # both groups together; pass --group linalg or --group sorting to bundler
@@ -5,6 +9,30 @@
 name: numerics_cpp
 language: cpp
 file_suffix: ".cpp"
+log_level: "INFO"
+
+diff_based_evolution: true
+max_iterations: 100
+checkpoint_interval: 10
+
+llm:
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  primary_model: "gemini-3.1-flash-lite"
+  temperature: 0.2
+  system_message: |
+    You are an expert C++ engineer optimizing a small numerics library.
+    Optimize the functions defined inside the EVOLVE-BLOCK markers to maximize execution speed.
+    The block may contain multiple related functions from different files -- keep them
+    consistent with each other if you change one's behavior.
+    Do not change any function signature or break correctness.
+
+database:
+  num_islands: 2
+
+evaluator:
+  cascade_evaluation: true
+  cascade_thresholds: [1.0, 1.0]
+  parallel_evaluations: 2
 
 bundler:
   src_dir: src

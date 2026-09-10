@@ -1,7 +1,34 @@
-# Same schema as examples/matmul_cpp/project.yaml
+# One file, two readers: OpenEvolve reads llm/database/evaluator/diff_based_evolution/etc,
+# eval/harness.py reads bundler/build/run/correctness/workspace/scoring. Each ignores
+# what it doesn't recognize, so this is safe to keep merged.
 name: matmul_py
 language: python
 file_suffix: ".py"
+log_level: "INFO"
+
+diff_based_evolution: true
+max_iterations: 10
+checkpoint_interval: 10  # keep <= max_iterations or the visualizer never sees a checkpoint (default 100)
+
+llm:
+  api_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  primary_model: "gemini-3.1-flash-lite"
+  temperature: 0.2
+  system_message: |
+    You are an expert Python performance engineer.
+    Optimize the function defined inside the EVOLVE-BLOCK markers to maximize execution speed
+    while keeping it pure Python (no new third-party dependencies).
+    You may use techniques such as avoiding redundant work, better data structures,
+    local-variable caching of repeated lookups, or built-ins/stdlib functions implemented in C.
+    Do not change the function signature or break program correctness.
+
+database:
+  num_islands: 2
+
+evaluator:
+  cascade_evaluation: true
+  cascade_thresholds: [1.0, 1.0]  # require full correctness before stage3
+  parallel_evaluations: 2
 
 bundler:
   src_dir: src

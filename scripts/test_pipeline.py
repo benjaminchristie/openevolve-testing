@@ -106,6 +106,33 @@ def clean_generated(example_dir: Path) -> None:
         shutil.rmtree(example_dir / junk, ignore_errors=True)
 
 
+def test_finalize(name: str, example_dir: Path, bundle_path: Path) -> None:
+    """Generic (language-agnostic) finalize.py check: feeding it the
+    unmodified bundle as "the best result" must report no changes, in both
+    patch and --apply mode, on a scratch copy so the real example is
+    untouched. This is the identity case; the interesting "a real change
+    round-trips as a working patch" case was verified by hand on numerics_cpp
+    rather than automated here, since it needs a per-language mutation."""
+    with tempfile.TemporaryDirectory(prefix=f"finalize_test_{name}_") as td:
+        scratch = Path(td) / "proj"
+        shutil.copytree(example_dir, scratch)
+        best_dir = scratch / "openevolve_output" / "best"
+        best_dir.mkdir(parents=True)
+        shutil.copy2(bundle_path, best_dir / f"best_program{bundle_path.suffix}")
+        (best_dir / "best_program_info.json").write_text('{"iteration": 0, "metrics": {}}')
+
+        for mode_args, label in ([], "patch"), (["--apply"], "--apply"):
+            res = subprocess.run(
+                [sys.executable, str(EVAL_DIR / "finalize.py"), str(scratch), *mode_args],
+                capture_output=True, text=True,
+            )
+            check(
+                f"{name}: finalize.py {label} reports no changes for an unmodified best result",
+                res.returncode == 0 and "no changes" in res.stdout.lower(),
+                res.stdout + res.stderr,
+            )
+
+
 def test_example(example_dir: Path) -> None:
     name = example_dir.name
     print(f"\n--- {name} ---")
@@ -146,6 +173,8 @@ def test_example(example_dir: Path) -> None:
 
     after = hash_tree(src_dir)
     check(f"{name}: evaluation never mutated the real project source", before == after)
+
+    test_finalize(name, example_dir, bundle_path)
 
     broken_bundle = bundle_path.with_name("broken" + bundle_path.suffix)
     if make_broken_bundle(bundle_path, broken_bundle):

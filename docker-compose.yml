@@ -1,5 +1,8 @@
 services:
   ollama:
+    # only started when actually needed -- see the openevolve service's
+    # depends_on below, and "Using a local Ollama model" in README.md
+    profiles: ["ollama"]
     image: ollama/ollama:latest
     container_name: ollama
     ports:
@@ -16,34 +19,39 @@ services:
               capabilities: [gpu]
 
   openevolve:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     image: openevolve-testing:local
     container_name: openevolve
     depends_on:
-      - ollama
+      # optional: only actually starts if the "ollama" profile is active
+      # (COMPOSE_PROFILES=ollama or --profile ollama), which you only need if
+      # project.yaml's llm.api_base points at it
+      ollama:
+        condition: service_started
+        required: false
     # without this, root-owned files land in the bind mount below and you'll
     # need sudo to delete them; run as: UID=$(id -u) GID=$(id -g) docker compose up
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
-      - ./:/app2
+      # any directory with a project.yaml, e.g.: PROJECT_PATH=~/research/my_project
+      - ${PROJECT_PATH:-./examples/matmul_cpp}:/project
     environment:
-      - "OPENAI_API_KEY=${OPENAI_API_KEY:?ERROR: OPENAI_API_KEY host environment variable is not set!}"
-      # which examples/<name>/ to run, e.g.: EXAMPLE=matmul_py docker compose up openevolve
-      - "EXAMPLE=${EXAMPLE:-matmul_cpp}"
-      - "OPENEVOLVE_PROJECT_DIR=/app2/examples/${EXAMPLE:-matmul_cpp}"
-      - "BUNDLER_BIN=/opt/bundler_src/build/bundler"  # pre-built into the image, see Dockerfile
-    entrypoint: ["sh", "-c"]
-    command:
-      - >
-        BUNDLE_PATH=$$(python3 /app2/eval/prepare.py "/app2/examples/$$EXAMPLE" | tail -1) &&
-        python /app/openevolve-run.py
-        "$$BUNDLE_PATH"
-        /app2/eval/evaluator.py
-        --config "/app2/config/$$EXAMPLE.yaml"
-        --output "/app2/openevolve_output/$$EXAMPLE"
+      # required unless project.yaml's llm.api_base is Ollama -- checked (and
+      # given an Ollama-appropriate placeholder if unset) in
+      # docker/entrypoint-evolve.sh, which can actually see that config
+      - "OPENAI_API_KEY=${OPENAI_API_KEY:-}"
+      - "OPENEVOLVE_PROJECT_DIR=/project"
+      # set to anything non-empty to apply the winning result directly instead
+      # of writing openevolve_output/best/best.patch for review
+      - "AUTO_APPLY=${AUTO_APPLY:-}"
+    # runs docker/entrypoint-evolve.sh (the image's default ENTRYPOINT, see docker/Dockerfile)
 
   visualizer:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     image: openevolve-testing:local
     container_name: openevolve_visualizer
     ports:
@@ -52,18 +60,8 @@ services:
       - openevolve
     user: "${UID:-1000}:${GID:-1000}"  # see openevolve service above
     volumes:
-      - ./:/app2
-    environment:
-      - "EXAMPLE=${EXAMPLE:-matmul_cpp}"
-    entrypoint: ["sh", "-c"]
-    command:
-      - >
-        until [ -d "/app2/openevolve_output/$$EXAMPLE/checkpoints" ]; do
-          echo "Waiting for checkpoints directory to be created...";
-          sleep 5;
-        done;
-        echo "Checkpoints directory found! Starting visualizer...";
-        python /app/scripts/visualizer.py --path "/app2/openevolve_output/$$EXAMPLE/checkpoints" --host 0.0.0.0
+      - ${PROJECT_PATH:-./examples/matmul_cpp}:/project
+    entrypoint: ["/opt/entrypoint-visualizer.sh"]
     restart: unless-stopped
 
 volumes:

@@ -3,8 +3,16 @@ OpenEvolve evolves from and every evaluate() call injects candidates against.
 Run once per project before starting OpenEvolve; re-run only if the
 @evolve-tagged source changed.
 
+Also snapshots the tagged files as-they-are-right-now into build/pristine/ --
+map.json's byte offsets are only valid against that exact content, so
+finalize.py restores from this snapshot before injecting rather than trusting
+whatever's currently in the project (which might already have a previous
+finalize --apply in it).
+
 Usage: python3 prepare.py <project_dir>
 """
+import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +43,16 @@ def prepare(project_dir: Path) -> Path:
     if result.returncode != 0:
         raise SystemExit(f"bundler extract failed: {result.stderr.strip()}")
     print(result.stdout.strip())
+
+    pristine_dir = map_path.parent / "pristine"
+    if pristine_dir.exists():
+        shutil.rmtree(pristine_dir)
+    tagged_files = sorted({b["file_path"] for b in json.loads(map_path.read_text())["blocks"]})
+    for rel in tagged_files:
+        dst = pristine_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(project_dir / rel, dst)
+
     return bundle_path
 
 
